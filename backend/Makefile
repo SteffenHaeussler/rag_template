@@ -24,3 +24,8 @@ up:
 
 down:
 	docker compose down --remove-orphans
+
+notebook:
+	uv run jupyter lab --ip=0.0.0.0 --port=8888 --notebook-dir=./notebooks
+
+nb: notebook

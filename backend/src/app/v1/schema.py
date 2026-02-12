@@ -1,6 +1,6 @@
-from typing import List, Optional
+from typing import Any, Dict, List, Optional, Union
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 #######################################################
 ### Request Schema
@@ -8,9 +8,16 @@ from pydantic import BaseModel
 
 
 class RankingRequest(BaseModel):
-    query: str
-    text: str
+    question: str
+    texts: List[str]
 
+class RankedItem(BaseModel):
+    text: str
+    score: float
+
+class RankingResponse(BaseModel):
+    question: str
+    results: List[RankedItem]
 
 class EmbeddingRequest(BaseModel):
     text: str
@@ -19,7 +26,24 @@ class EmbeddingRequest(BaseModel):
 class SearchRequest(BaseModel):
     embedding: List[float]
     n_items: Optional[int] = None
-    table: Optional[str] = None
+
+
+class CollectionCreate(BaseModel):
+    name: str
+    dimension: int = Field(..., description="Vector dimension (e.g., 384 for all-MiniLM-L6-v2)")
+    distance_metric: str = "cosine"
+
+
+class DatapointCreate(BaseModel):
+    id: Optional[Union[str, int]] = None
+    text: str
+    metadata: Dict[str, Any] = {}
+    embedding: Optional[List[float]] = None
+
+
+class DatapointUpdate(BaseModel):
+    text: Optional[Union[str, int]] = None
+    metadata: Optional[Dict[str, Any]] = None
 
 
 #######################################################
@@ -32,11 +56,6 @@ class HealthCheckResponse(BaseModel):
     timestamp: float
 
 
-class RankingResponse(BaseModel):
-    question: str
-    text: str
-    score: float
-
 
 class EmbeddingResponse(BaseModel):
     text: str
@@ -44,14 +63,53 @@ class EmbeddingResponse(BaseModel):
 
 
 class SearchPoint(BaseModel):
-    id: str
+    id: Optional[Union[str, int]]
     score: float
-    description: str
-    name: str
-    tag: str
-    location: str
-    area: str
+    text: str
+    category: Optional[str] = None
 
 
 class SearchResponse(BaseModel):
     results: List[SearchPoint]
+
+
+class CollectionResponse(BaseModel):
+    name: str
+    status: str
+    count: int
+
+
+class DatapointResponse(BaseModel):
+    id: str
+    text: str
+    metadata: Dict[str, Any] = {}
+
+
+class DatapointEmbeddingResponse(BaseModel):
+    id: str
+    embedding: List[float]
+
+
+class BulkInsertResponse(BaseModel):
+    inserted_count: int
+
+
+class StatusResponse(BaseModel):
+    id: Union[str, int]
+    status: str
+
+
+class SearchResult(BaseModel):
+    text: str
+    score: float
+    metadata: Dict[str, Any] = {}
+
+class QueryRequest(BaseModel):
+    question: str
+    table_name: Optional[str] = None
+    n_retrieval: Optional[int] = None
+    n_ranking: Optional[int] = None
+
+class QueryResponse(BaseModel):
+    question: str
+    results: List[SearchResult]
