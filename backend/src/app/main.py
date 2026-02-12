@@ -7,12 +7,12 @@ from fastapi import FastAPI
 from loguru import logger
 from qdrant_client import QdrantClient
 
-from api.config import Config
-from api.core import router as core_router
-from api.logging import setup_logger
-from api.middleware import RequestTimer, add_request_id
-from api.utils import load_models
-from api.v1 import router as v1_router
+from src.app.config import Config
+from src.app.core import router as core_router
+from src.app.logging import setup_logger
+from src.app.middleware import RequestTimer, add_request_id
+from src.app.utils import load_models
+from src.app.v1 import router as v1_router
 
 
 def get_application(config: Config) -> FastAPI:
@@ -33,7 +33,7 @@ def get_application(config: Config) -> FastAPI:
     request_timer = RequestTimer()
     application = FastAPI(lifespan=lifespan)
 
-    application.state = config
+    application.state.config = config
 
     config.models = load_models(
         config.ROOTDIR,

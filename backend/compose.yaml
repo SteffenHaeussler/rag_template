@@ -4,10 +4,10 @@ services:
   sim_api:
     build:
       context: .
-    image: sim_ir:latest
-    container_name: sim_ir
+    image: backend:latest
+    container_name: backend
     ports:
-      - "5051:5051"
+      - "8000:8000"
     restart: unless-stopped
 
   qdrant:

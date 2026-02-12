@@ -19,24 +19,24 @@ v1 = APIRouter()
 @v1.get("/health", response_model=HealthCheckResponse)
 def health(request: Request) -> HealthCheckResponse:
     logger.debug(f"Methode: {request.method} on {request.url.path}")
-    return {"version": request.app.state.VERSION, "timestamp": time()}
+    return {"version": request.app.state.config.VERSION, "timestamp": time()}
 
 
 @v1.post("/health", response_model=HealthCheckResponse)
 def health(request: Request) -> HealthCheckResponse:
     logger.debug(f"Methode: {request.method} on {request.url.path}")
-    return {"version": request.app.state.VERSION, "timestamp": time()}
+    return {"version": request.app.state.config.VERSION, "timestamp": time()}
 
 
 @v1.get("/embedding/")
 def embedding(request: Request, text: str) -> EmbeddingResponse:
     logger.debug(f"Methode: {request.method} on {request.url.path}")
 
-    inputs = request.app.state.models["bi_tokenizer"](
+    inputs = request.app.state.config.models["bi_tokenizer"](
         text, padding=True, truncation=True, return_tensors="np"
     )
 
-    outputs = request.app.state.models["bi_encoder"](**inputs)
+    outputs = request.app.state.config.models["bi_encoder"](**inputs)
     mean_embedding = np.mean(outputs.last_hidden_state, axis=1).tolist()[0]
     return EmbeddingResponse(text=text, embedding=mean_embedding)
 
@@ -45,11 +45,11 @@ def embedding(request: Request, text: str) -> EmbeddingResponse:
 def ranking(request: Request, question: str, text: str) -> RankingResponse:
     logger.debug(f"Methode: {request.method} on {request.url.path}")
 
-    inputs = request.app.state.models["cross_tokenizer"](
+    inputs = request.app.state.config.models["cross_tokenizer"](
         [(question, text)], padding=True, truncation=True, return_tensors="np"
     )
 
-    outputs = request.app.state.models["cross_encoder"](**inputs)
+    outputs = request.app.state.config.models["cross_encoder"](**inputs)
 
     score = outputs.logits.tolist()[0][0]
 
@@ -63,16 +63,16 @@ def search(request: Request, body: SearchRequest) -> SearchResponse:
     table = body.table
 
     if n_items is None:
-        n_items = request.app.state.kb_limit
+        n_items = request.app.state.config.kb_limit
 
     if table is None:
-        table = request.app.state.kb_name
+        table = request.app.state.config.kb_name
 
     # Your search logic using the embedding
     logger.debug(f"Methode: {request.method} on {request.url.path}")
 
     client = QdrantClient(
-        host=request.app.state.kb_host, port=int(request.app.state.kb_port)
+        host=request.app.state.config.kb_host, port=int(request.app.state.config.kb_port)
     )
     results = client.query_points(
         collection_name=table,

@@ -45,7 +45,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 ENV PATH="/app/.venv/bin:$PATH"
 
 # Reset the entrypoint, don't invoke `uv`
-EXPOSE 5051
+EXPOSE 8000
 
 # Run the FastAPI application by default
 # Uses `fastapi dev` to enable hot-reloading when the `watch` sync occurs

@@ -15,11 +15,13 @@ class Config(BaseSettings):
     FASTAPI_ENV: constr(to_upper=True) = Field(default="DEV", env="FASTAPI_ENV")
     BASEDIR: str = str(Path(__file__).resolve().parent)
     ROOTDIR: str = str(Path(__file__).resolve().parents[2])
-    VERSION: str = importlib.metadata.version("sim_ir")
+    VERSION: str = importlib.metadata.version("backend")
 
     DEBUG: bool = False
 
+    bi_encoder: str = Field(env="bi_encoder")
     bi_encoder_path: str = Field(env="bi_encoder_path")
+    cross_encoder: str = Field(env="cross_encoder")
     cross_encoder_path: str = Field(env="cross_encoder_path")
 
     llm_api_key: str = Field(env="llm_api_key")
