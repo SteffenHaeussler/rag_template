@@ -1,14 +1,16 @@
 version: '3.8' # Specifies the Docker Compose file format version
 
 services:
-  # backend:
-  #   build:
-  #     context: .
-  #   image: backend:latest
-  #   container_name: backend
-  #   ports:
-  #     - "8000:8000"
-  #   restart: unless-stopped
+  backend:
+    build:
+      context: .
+    image: backend:latest
+    container_name: backend
+    ports:
+      - "8000:8000"
+    restart: unless-stopped
+    environment:
+      KB_HOST: "qdrant"
 
   qdrant:
     image: qdrant/qdrant:master
