@@ -11,6 +11,13 @@ services:
     restart: unless-stopped
     environment:
       KB_HOST: "qdrant"
+    volumes:
+      - ./models:/app/models
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
 
   qdrant:
     image: qdrant/qdrant:master
@@ -25,3 +32,27 @@ services:
       QDRANT__SERVICE__GRPC_PORT: 6334
       QDRANT__SERVICE__HTTP_PORT: 6333
       QDRANT__LOG_LEVEL: ERROR
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'echo > /dev/tcp/localhost/6333'"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  tests:
+    image: backend:latest
+    build:
+      context: .
+    profiles:
+      - test
+    env_file: .env
+    depends_on:
+      backend:
+        condition: service_healthy
+      qdrant:
+        condition: service_healthy
+    volumes:
+      - ./tests/e2e:/e2e
+    environment:
+      BACKEND_URL: http://backend:8000
+      QDRANT_HOST: qdrant
+    command: bash -c "uv sync --dev && uv run pytest /e2e -v"

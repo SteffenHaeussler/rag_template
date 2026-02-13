@@ -35,3 +35,10 @@ notebook:
 	uv run jupyter lab --ip=0.0.0.0 --port=8888 --notebook-dir=./notebooks
 
 nb: notebook
+
+test-e2e:
+	uv run pytest tests/e2e
+
+test-docker:
+	docker compose -f compose.yaml --profile test up tests --build --abort-on-container-exit --exit-code-from tests
+

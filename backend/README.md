@@ -1,17 +1,21 @@
 # fastapi_skeleton
 
-Simple fastapi skeleton for a stateless microservice (application for ml models, optimization, ...)
+Simple fastapi skeleton for a stateless microservice (application for main models, optimization, ...)
 
 ## Running service manually
 
-To run the service manually in debug mode install the required python dependencies:
+To run the service manually in debug mode ensure you have `uv` installed.
 
-`uv install`
+You can run the service in debug mode using the Makefile:
 
-You can run the service in debug mode:
-
+```bash
+make dev
 ```
-export FASTAPI_ENV="dev"
+
+Or manually:
+
+```bash
+export FASTAPI_ENV="DEV"
 ./run_app.sh
 ```
 
@@ -19,36 +23,32 @@ export FASTAPI_ENV="dev"
 
 To build the Docker image:
 
-`docker build -t "fastapi-api:latest" . --build-arg FASTAPI_ENV=dev`
+`docker build -t "fastapi-api:latest" .`
 
 To run the Docker image:
 
 ```
-docker run -p 5051:5051 -ti sim_ir:latest
+docker run -p 8000:8000 -ti fastapi-api:latest
 ```
 
 ## Local querying
 
 To check that the service is alive, run:
 
-`curl -X GET "http://localhost:5000/health" -H  "accept: application/json"`
-
-`curl -X GET "http://localhost:5000/v1/health" -H  "accept: application/json"`
-
-For the websockets endpoint, run:
-
-`websocat ws://127.0.0.1:5000/ws/health`
-
-`websocat ws://127.0.0.1:5000/v1/ws/health`
-
+`curl -X GET "http://localhost:8000/health" -H  "accept: application/json"`
 
 ## API Documentation
 
-The user interface for the API is defined in `http://localhost:5000/docs` endpoint.
-Be aware, that OpenAPI schema doesn't support websockets.
+The user interface for the API is defined in `http://localhost:8000/docs` endpoint.
 
 ## Testing
 
 To run the tests:
 
-`uv run python -m pytest --verbose --cov=./`
+```bash
+make test
+```
+
+Or directly with uv:
+
+`uv run pytest`
