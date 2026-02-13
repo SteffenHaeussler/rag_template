@@ -3,32 +3,12 @@ from time import time
 from typing import Any, Dict, List, Union
 
 import numpy as np
-from fastapi import APIRouter, HTTPException, Request, status
-from loguru import logger
-from qdrant_client.models import Distance, PointStruct, ScoredPoint, VectorParams
+from fastapi import APIRouter, Depends, HTTPException, Request, status
+from qdrant_client import QdrantClient
 
-from src.app.v1.schema import (
-    BulkInsertResponse,
-    CollectionCreate,
-    CollectionResponse,
-    DatapointCreate,
-    DatapointEmbeddingResponse,
-    DatapointResponse,
-    DatapointUpdate,
-    EmbeddingRequest,
-    EmbeddingResponse,
-    HealthCheckResponse,
-    RankingResponse,
-    QueryRequest,
-    QueryResponse,
-    SearchPoint,
-    SearchRequest,
-    SearchResponse,
-    StatusResponse,
-    SearchResult,
-    RankingRequest,
-    RankedItem,
-)
+from qdrant_client.models import Distance, PointStruct, VectorParams
+
+import src.app.v1.schema as schema
 
 v1 = APIRouter()
 
@@ -40,57 +20,35 @@ DISTANCE_MAP = {
 }
 
 
-@v1.get("/health", response_model=HealthCheckResponse)
-def health_get(request: Request) -> HealthCheckResponse:
-    logger.debug(f"Methode: {request.method} on {request.url.path}")
-    return {"version": request.app.state.config.VERSION, "timestamp": time()}
-
-
-@v1.post("/health", response_model=HealthCheckResponse)
-def health_post(request: Request) -> HealthCheckResponse:
-    logger.debug(f"Methode: {request.method} on {request.url.path}")
-    return {"version": request.app.state.config.VERSION, "timestamp": time()}
-
-
 # ==========================================
-# 1. Collection Operations
+# Dependencies
 # ==========================================
 
 
-@v1.post("/collections/", status_code=status.HTTP_201_CREATED, response_model=CollectionResponse)
-def create_collection(request: Request, collection: CollectionCreate):
-    qdrant = request.app.state.qdrant
-    logger.debug(f"Methode: {request.method} on {request.url.path}")
-
-    if qdrant.collection_exists(collection.name):
-        raise HTTPException(status_code=400, detail="Collection already exists")
-
-    distance = DISTANCE_MAP.get(collection.distance_metric.lower())
-    if not distance:
-        raise HTTPException(status_code=400, detail=f"Unknown distance metric: {collection.distance_metric}")
-
-    qdrant.create_collection(
-        collection_name=collection.name,
-        vectors_config=VectorParams(size=collection.dimension, distance=distance),
-    )
-
-    return CollectionResponse(name=collection.name, status="created", count=0)
+def get_qdrant(request: Request) -> QdrantClient:
+    return request.app.state.qdrant
 
 
-@v1.delete("/collections/{collection_name}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_collection(request: Request, collection_name: str):
-    qdrant = request.app.state.qdrant
-    logger.debug(f"Methode: {request.method} on {request.url.path}")
-
+def verify_collection(collection_name: str, qdrant: QdrantClient = Depends(get_qdrant)) -> str:
     if not qdrant.collection_exists(collection_name):
         raise HTTPException(status_code=404, detail="Collection not found")
-
-    qdrant.delete_collection(collection_name)
+    return collection_name
 
 
 # ==========================================
-# 2. Datapoint Operations (Single & Bulk)
+# Helper
 # ==========================================
+
+
+def parse_datapoint_id(datapoint_id: str) -> Union[str, int]:
+    """Convert datapoint ID to int if numeric, validate UUID otherwise."""
+    if datapoint_id.isdigit():
+        return int(datapoint_id)
+    try:
+        uuid.UUID(datapoint_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"Invalid datapoint ID: {datapoint_id}. Must be an integer or UUID.")
+    return datapoint_id
 
 
 def _embed_text(request: Request, text: str) -> list[float]:
@@ -104,23 +62,29 @@ def _embed_text(request: Request, text: str) -> list[float]:
 
 
 def _query_qdrant(
-    request: Request,
+    qdrant: QdrantClient,
     collection_name: str,
     vector: List[float],
     limit: int
-) -> List[ScoredPoint]:
+) -> List[schema.QdrantPoint]:
     """
     Generic wrapper for Qdrant querying.
     Returns the raw Qdrant points (ID, Score, Payload).
     """
-    qdrant = request.app.state.qdrant
-
     results = qdrant.query_points(
         collection_name=collection_name,
         query=vector,
         limit=limit,
     )
-    return results.points
+    return [
+        schema.QdrantPoint(
+            id=point.id,
+            score=point.score,
+            payload=point.payload,
+            vector=point.vector,
+        )
+        for point in results.points
+    ]
 
 
 def _rerank_candidates(
@@ -128,7 +92,7 @@ def _rerank_candidates(
     question: str,
     candidates: List[Dict[str, Any]],
     top_k: int
-) -> List[SearchResult]:
+) -> List[schema.SearchResult]:
     """Sorts candidates by relevance using the Cross-Encoder."""
 
     if not candidates:
@@ -138,25 +102,21 @@ def _rerank_candidates(
     tokenizer = config.models["cross_tokenizer"]
     model = config.models["cross_encoder"]
 
-    # 1. Prepare pairs for the model: [ [Question, Text1], [Question, Text2], ... ]
     candidate_texts = [c.get("text", "") for c in candidates]
     pairs = [[question, text] for text in candidate_texts]
 
-    # 2. Tokenize & Predict
     inputs = tokenizer(
         pairs, padding=True, truncation=True, return_tensors="np"
     )
     outputs = model(**inputs)
 
-    # 3. Extract scores
     # Flatten logits to a 1D array
     scores = outputs.logits.reshape(-1).tolist()
 
-    # 4. Zip, Sort, and Format
     ranked_results = []
     for score, content in zip(scores, candidates):
         ranked_results.append(
-            SearchResult(
+            schema.SearchResult(
                 text=content.get("text", ""),
                 score=score,
                 metadata=content # Pass full payload as metadata
@@ -166,17 +126,53 @@ def _rerank_candidates(
     # Sort descending (Highest score first)
     ranked_results.sort(key=lambda x: x.score, reverse=True)
 
-    # Return only the requested amount
     return ranked_results[:top_k]
 
-@v1.post("/collections/{collection_name}/datapoints/", status_code=status.HTTP_201_CREATED, response_model=StatusResponse)
-def insert_datapoint(request: Request, collection_name: str, datapoint: DatapointCreate):
-    qdrant = request.app.state.qdrant
-    logger.debug(f"Methode: {request.method} on {request.url.path}")
 
-    if not qdrant.collection_exists(collection_name):
-        raise HTTPException(status_code=404, detail="Collection not found")
+# ==========================================
+# Health Checks
+# ==========================================
 
+
+@v1.api_route("/health", methods=["GET", "POST"], response_model=schema.HealthCheckResponse)
+def health(request: Request) -> schema.HealthCheckResponse:
+    return {"version": request.app.state.config.VERSION, "timestamp": time()}
+
+
+# ==========================================
+# Collection Operations
+# ==========================================
+
+
+@v1.post("/collections/", status_code=status.HTTP_201_CREATED, response_model=schema.CollectionResponse)
+def create_collection(request: Request, collection: schema.CollectionCreate, qdrant: QdrantClient = Depends(get_qdrant)):
+    if qdrant.collection_exists(collection.name):
+        raise HTTPException(status_code=400, detail="Collection already exists")
+
+    distance = DISTANCE_MAP.get(collection.distance_metric.lower())
+    if not distance:
+        raise HTTPException(status_code=400, detail=f"Unknown distance metric: {collection.distance_metric}")
+
+    qdrant.create_collection(
+        collection_name=collection.name,
+        vectors_config=VectorParams(size=collection.dimension, distance=distance),
+    )
+
+    return schema.CollectionResponse(name=collection.name, status="created", count=0)
+
+
+@v1.delete("/collections/{collection_name}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_collection(request: Request, collection_name: str = Depends(verify_collection), qdrant: QdrantClient = Depends(get_qdrant)):
+    qdrant.delete_collection(collection_name)
+
+
+# ==========================================
+# Datapoint Operations (Single & Bulk)
+# ==========================================
+
+
+@v1.post("/collections/{collection_name}/datapoints/", status_code=status.HTTP_201_CREATED, response_model=schema.StatusResponse)
+def insert_datapoint(request: Request, datapoint: schema.DatapointCreate, collection_name: str = Depends(verify_collection), qdrant: QdrantClient = Depends(get_qdrant)):
     point_id = datapoint.id or str(uuid.uuid4())
     embedding = datapoint.embedding or _embed_text(request, datapoint.text)
 
@@ -191,17 +187,11 @@ def insert_datapoint(request: Request, collection_name: str, datapoint: Datapoin
         ],
     )
 
-    return StatusResponse(id=point_id, status="inserted")
+    return schema.StatusResponse(id=point_id, status="inserted")
 
 
-@v1.post("/collections/{collection_name}/datapoints/bulk", status_code=status.HTTP_201_CREATED, response_model=BulkInsertResponse)
-def insert_bulk_datapoints(request: Request, collection_name: str, datapoints: List[DatapointCreate]):
-    qdrant = request.app.state.qdrant
-    logger.debug(f"Methode: {request.method} on {request.url.path}")
-
-    if not qdrant.collection_exists(collection_name):
-        raise HTTPException(status_code=404, detail="Collection not found")
-
+@v1.post("/collections/{collection_name}/datapoints/bulk", status_code=status.HTTP_201_CREATED, response_model=schema.BulkInsertResponse)
+def insert_bulk_datapoints(request: Request, datapoints: List[schema.DatapointCreate], collection_name: str = Depends(verify_collection), qdrant: QdrantClient = Depends(get_qdrant)):
     points = []
     for dp in datapoints:
         point_id = dp.id or str(uuid.uuid4())
@@ -215,27 +205,24 @@ def insert_bulk_datapoints(request: Request, collection_name: str, datapoints: L
         )
 
     # Batch upsert
-    batch_size = 100
+    batch_size = request.app.state.config.kb_batch_size
     for i in range(0, len(points), batch_size):
         qdrant.upsert(
             collection_name=collection_name,
             points=points[i : i + batch_size],
         )
 
-    return BulkInsertResponse(inserted_count=len(points))
+    return schema.BulkInsertResponse(inserted_count=len(points))
 
 
 # ==========================================
-# 3. Retrieval & Embedding
+# Datapoint Retrieval
 # ==========================================
 
 
-@v1.get("/collections/{collection_name}/datapoints/{datapoint_id}", response_model=DatapointResponse)
-def get_datapoint(request: Request, collection_name: str, datapoint_id: Union[str, int]):
-    qdrant = request.app.state.qdrant
-    logger.debug(f"Methode: {request.method} on {request.url.path}")
-
-    datapoint_id = int(datapoint_id) if datapoint_id.isdigit() else datapoint_id
+@v1.get("/collections/{collection_name}/datapoints/{datapoint_id}", response_model=schema.DatapointResponse)
+def get_datapoint(request: Request, collection_name: str, datapoint_id: Union[str, int], qdrant: QdrantClient = Depends(get_qdrant)):
+    datapoint_id = parse_datapoint_id(datapoint_id)
     results = qdrant.retrieve(
         collection_name=collection_name,
         ids=[datapoint_id],
@@ -249,15 +236,12 @@ def get_datapoint(request: Request, collection_name: str, datapoint_id: Union[st
     point = results[0]
     payload = point.payload or {}
     text = payload.pop("text", "")
-    return DatapointResponse(id=str(point.id), text=text, metadata=payload)
+    return schema.DatapointResponse(id=str(point.id), text=text, metadata=payload)
 
 
-@v1.get("/collections/{collection_name}/datapoints/{datapoint_id}/embedding", response_model=DatapointEmbeddingResponse)
-def get_datapoint_embedding(request: Request, collection_name: str, datapoint_id: str):
-    qdrant = request.app.state.qdrant
-    logger.debug(f"Methode: {request.method} on {request.url.path}")
-
-    datapoint_id = int(datapoint_id) if datapoint_id.isdigit() else datapoint_id
+@v1.get("/collections/{collection_name}/datapoints/{datapoint_id}/embedding", response_model=schema.DatapointEmbeddingResponse)
+def get_datapoint_embedding(request: Request, collection_name: str, datapoint_id: str, qdrant: QdrantClient = Depends(get_qdrant)):
+    datapoint_id = parse_datapoint_id(datapoint_id)
 
     results = qdrant.retrieve(
         collection_name=collection_name,
@@ -269,20 +253,17 @@ def get_datapoint_embedding(request: Request, collection_name: str, datapoint_id
     if not results:
         raise HTTPException(status_code=404, detail="Datapoint not found")
 
-    return DatapointEmbeddingResponse(id=str(results[0].id), embedding=results[0].vector)
+    return schema.DatapointEmbeddingResponse(id=str(results[0].id), embedding=results[0].vector)
 
 
 # ==========================================
-# 4. Update & Delete
+# Datapoint Update & Delete
 # ==========================================
 
 
-@v1.put("/collections/{collection_name}/datapoints/{datapoint_id}", response_model=StatusResponse)
-def update_datapoint(request: Request, collection_name: str, datapoint_id: str, update_data: DatapointUpdate):
-    qdrant = request.app.state.qdrant
-    logger.debug(f"Methode: {request.method} on {request.url.path}")
-
-    datapoint_id = int(datapoint_id) if datapoint_id.isdigit() else datapoint_id
+@v1.put("/collections/{collection_name}/datapoints/{datapoint_id}", response_model=schema.StatusResponse)
+def update_datapoint(request: Request, collection_name: str, datapoint_id: str, update_data: schema.DatapointUpdate, qdrant: QdrantClient = Depends(get_qdrant)):
+    datapoint_id = parse_datapoint_id(datapoint_id)
 
     # Check point exists
     results = qdrant.retrieve(
@@ -313,110 +294,82 @@ def update_datapoint(request: Request, collection_name: str, datapoint_id: str, 
         points=[PointStruct(id=datapoint_id, vector=vector, payload=payload)],
     )
 
-    return StatusResponse(id=datapoint_id, status="updated")
+    return schema.StatusResponse(id=datapoint_id, status="updated")
 
 
 @v1.delete("/collections/{collection_name}/datapoints/{datapoint_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_datapoint(request: Request, collection_name: str, datapoint_id: str):
-    qdrant = request.app.state.qdrant
-    logger.debug(f"Methode: {request.method} on {request.url.path}")
-
-    datapoint_id = int(datapoint_id) if datapoint_id.isdigit() else datapoint_id
+def delete_datapoint(request: Request, collection_name: str, datapoint_id: str, qdrant: QdrantClient = Depends(get_qdrant)):
+    datapoint_id = parse_datapoint_id(datapoint_id)
 
     qdrant.delete(
         collection_name=collection_name,
         points_selector=[datapoint_id],
     )
 
-    return StatusResponse(id=datapoint_id, status="deleted")
-
 # ==========================================
-# 5. Embedding & Ranking & Search
+# Embedding, Ranking & Search
 # ==========================================
 
 
-@v1.post("/embedding/", response_model=EmbeddingResponse)
-def embedding(request: Request, body: EmbeddingRequest) -> EmbeddingResponse:
-    logger.debug(f"Methode: {request.method} on {request.url.path}")
-
+@v1.post("/embedding/", response_model=schema.EmbeddingResponse)
+def embedding(request: Request, body: schema.EmbeddingRequest) -> schema.EmbeddingResponse:
     mean_embedding = _embed_text(request, body.text)
-    return EmbeddingResponse(text=body.text, embedding=mean_embedding)
+    return schema.EmbeddingResponse(text=body.text, embedding=mean_embedding)
 
 
 @v1.post("/ranking/")
-def ranking(request: Request, body: RankingRequest) -> RankingResponse:
-    logger.debug(f"Methode: {request.method} on {request.url.path}")
-
-    tokenizer = request.app.state.config.models["cross_tokenizer"]
-    model = request.app.state.config.models["cross_encoder"]
-
-    pairs = [[body.question, text] for text in body.texts]
-
-    inputs = tokenizer(
-        pairs,
-        padding=True,
-        truncation=True,
-        return_tensors="np"
+def ranking(request: Request, body: schema.RankingRequest) -> schema.RankingResponse:
+    candidates = [{"text": text} for text in body.texts]
+    ranked_results = _rerank_candidates(
+        request=request,
+        question=body.question,
+        candidates=candidates,
+        top_k=len(body.texts),
     )
 
-    outputs = model(**inputs)
-    raw_scores = outputs.logits.reshape(-1).tolist()
-
-    ranked_results = []
-    for text, score in zip(body.texts, raw_scores):
-        ranked_results.append(RankedItem(text=text, score=score))
-
-    # Sort descending (best match first)
-    ranked_results.sort(key=lambda x: x.score, reverse=True)
-
-    return RankingResponse(question=body.question, results=ranked_results)
+    return schema.RankingResponse(question=body.question, results=ranked_results)
 
 
-@v1.post("/collections/{collection_name}/search/", response_model=SearchResponse)
-def search(request: Request, collection_name: str, body: SearchRequest) -> SearchResponse:
+@v1.post("/collections/{collection_name}/search/", response_model=schema.SearchResponse)
+def search(request: Request, collection_name: str, body: schema.SearchRequest, qdrant: QdrantClient = Depends(get_qdrant)) -> schema.SearchResponse:
     config = request.app.state.config
-    qdrant = request.app.state.qdrant
-    n_items = body.n_items or config.kb_limit
-
-    logger.debug(f"Methode: {request.method} on {request.url.path}")
+    n_items = body.n_retrieval or config.kb_limit
 
     points = _query_qdrant(
-            request=request,
+            qdrant=qdrant,
             collection_name=collection_name,
             vector=body.embedding,
             limit=n_items
         )
 
-    # 2. Format for API Response
     response_data = []
     for point in points:
-        # safely merge payload with top-level attributes (id, score)
-        # point.payload might be None, so we default to {}
         payload = point.payload or {}
+        text = payload.pop("text", "")
+        metadata = {"id": point.id, **payload}
         response_data.append(
-            SearchPoint(
-                id=point.id,
-                score=point.score,
-                **payload  # Unpacks 'text', 'metadata', etc. from the DB payload
-            )
+            schema.SearchResult(text=text, score=point.score, metadata=metadata)
         )
 
-    return SearchResponse(results=response_data)
+    return schema.SearchResponse(results=response_data)
 
 
-@v1.post("/query/", response_model=QueryResponse)
-def full_rag_pipeline(request: Request, body: QueryRequest) -> QueryResponse:
-    logger.debug(f"Pipeline started for: {body.question}")
-
+@v1.post("/query/", response_model=schema.QueryResponse)
+def full_rag_pipeline(request: Request, body: schema.QueryRequest, qdrant: QdrantClient = Depends(get_qdrant)) -> schema.QueryResponse:
+    config = request.app.state.config
     query_vector = _embed_text(request, body.question)
 
-    table = body.table_name or request.app.state.config.kb_name
+    collection = body.collection_name or config.kb_name
+    if not qdrant.collection_exists(collection):
+        raise HTTPException(status_code=404, detail=f"Collection '{collection}' not found")
+    n_retrieval = body.n_retrieval or config.kb_limit
+    n_ranking = body.n_ranking or config.kb_limit
 
     candidates = _query_qdrant(
-        request=request,
+        qdrant=qdrant,
         vector=query_vector,
-        collection_name=table,
-        limit=body.n_retrieval
+        collection_name=collection,
+        limit=n_retrieval
     )
 
     candidates_list = [point.payload or {} for point in candidates]
@@ -425,7 +378,7 @@ def full_rag_pipeline(request: Request, body: QueryRequest) -> QueryResponse:
         request=request,
         question=body.question,
         candidates=candidates_list,
-        top_k=body.n_ranking
+        top_k=n_ranking
     )
 
-    return QueryResponse(question=body.question, results=final_results)
+    return schema.QueryResponse(question=body.question, results=final_results)

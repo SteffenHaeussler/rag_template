@@ -9,7 +9,7 @@ from src.app.context import ctx_request_id
 
 class RequestTimer:
     async def __call__(self, request: Request, call_next):
-        logger.info("Incoming request")
+        logger.debug(f"Method: {request.method} on {request.url.path}")
         start_time = time.time()
 
         response = await call_next(request)

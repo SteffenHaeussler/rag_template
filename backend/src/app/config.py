@@ -31,6 +31,7 @@ class Config(BaseSettings):
     kb_port: int = Field(env="kb_port", default=6333)
     kb_name: str = Field(env="kb_name")
     kb_limit: int = Field(env="kb_limit", default=20)
+    kb_batch_size: int = Field(env="kb_batch_size", default=100)
 
     model_config = SettingsConfigDict(env_file=_env_file, env_file_encoding="utf-8")
 

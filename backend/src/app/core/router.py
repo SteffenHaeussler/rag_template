@@ -8,13 +8,7 @@ from src.app.core.schema import HealthCheckResponse
 core = APIRouter()
 
 
-@core.get("/health", response_model=HealthCheckResponse)
+@core.api_route("/health", methods=["GET", "POST"], response_model=HealthCheckResponse)
 def health(request: Request) -> HealthCheckResponse:
-    logger.debug(f"Methode: {request.method} on {request.url.path}")
-    return {"version": request.app.state.config.VERSION, "timestamp": time()}
-
-
-@core.post("/health", response_model=HealthCheckResponse)
-def health(request: Request) -> HealthCheckResponse:
-    logger.debug(f"Methode: {request.method} on {request.url.path}")
+    logger.debug(f"Method: {request.method} on {request.url.path}")
     return {"version": request.app.state.config.VERSION, "timestamp": time()}
