@@ -22,6 +22,7 @@ services:
     environment:
       QDRANT_HOST: qdrant
 
+
   frontend:
     build: ./frontend
     ports:
@@ -44,6 +45,8 @@ services:
     environment:
       QDRANT_HOST: qdrant
       DATA_DIR: /data
+
+
 
 volumes:
   qdrant_data:

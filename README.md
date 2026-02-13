@@ -128,13 +128,17 @@ rag_template/
 │   │   └── config.py         # Environment config
 │   └── tests/
 ├── backend/                  # FastAPI backend service
-│   ├── src/api/
-│   │   ├── main.py           # App + lifespan
-│   │   ├── routes.py         # POST /query, GET /health
-│   │   ├── rag.py            # Retrieve + generate
-│   │   ├── schemas.py        # Pydantic models
-│   │   └── config.py         # Environment config
-│   └── tests/
+│   ├── src/app/              # Application source code
+│   │   ├── core/             # Core configurations (config, logging)
+│   │   ├── v1/               # API version 1
+│   │   │   ├── router.py     # API routes
+│   │   │   └── schema.py     # Pydantic models
+│   │   ├── main.py           # App entrypoint
+│   │   └── ...
+│   ├── tests/
+│   ├── Makefile              # Project commands
+│   ├── pyproject.toml        # Poetry/uv configuration
+│   └── uv.lock
 └── frontend/                 # Streamlit frontend
     └── src/frontend/app.py
 ```
@@ -156,10 +160,12 @@ All configuration is via environment variables (`.env` file):
 
 ```bash
 # Ingestion tests
-cd ingestion && pip install -e ".[dev]" && pytest
+cd ingestion && uv run pytest
 
 # Backend tests
-cd backend && pip install -e ".[dev]" && pytest
+cd backend && make test
+# OR
+cd backend && uv run pytest
 ```
 
 ## Design Decisions
