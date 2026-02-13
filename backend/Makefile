@@ -15,6 +15,12 @@ run:
 	@echo "Setting FASTAPI_ENV to TEST and running tests..."
 	FASTAPI_ENV=TEST ./run_app.sh
 
+test:
+	uv run pytest
+
+coverage:
+	uv run pytest --cov=src
+
 
 build:
 	docker compose build
