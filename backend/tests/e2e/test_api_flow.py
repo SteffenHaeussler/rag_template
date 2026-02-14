@@ -100,6 +100,28 @@ def test_rag_lifecycle(http_client: Client):
     assert response.status_code == 200
     assert "results" in response.json()
 
-    # 9. Cleanup - Delete Collection
+    # 9. Chat / Generation
+    chat_payload = {
+        "question": "What is the primary language for AI?",
+        "temperature": 0.1
+    }
+    # Note: This might fail if LLM API key is not configured in the running backend
+    response = http_client.post("/v1/chat/", json=chat_payload)
+
+    # We allow 500 if detailed error suggests missing API key, but ideally 200
+    if response.status_code == 200:
+        assert "answer" in response.json()
+        assert len(response.json()["answer"]) > 0
+    else:
+        # Optional: Print warning if it fails due to missing key, but don't fail test hard
+        # API might return 500 or 400 depending on implementation.
+        # For strict E2E, we might want to assert 200, assuming env is set up.
+        # Given user prompt "can you also write me some e2e tests", I will enforce success
+        # but add a SKIP mechanism or assume the user has keys.
+        # However, checking the logs suggests the user wants "services to e2e tests".
+        # Let's assert 200.
+        assert response.status_code == 200
+
+    # 10. Cleanup - Delete Collection
     response = http_client.delete(f"/v1/collections/{COLLECTION_NAME}")
     assert response.status_code == 204

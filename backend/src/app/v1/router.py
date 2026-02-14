@@ -317,6 +317,12 @@ def chat(request: Request, body: schema.ChatRequest, qdrant: QdrantClient = Depe
 
     # Generate Answer
     generation_service = GenerationService(request)
-    answer = generation_service.generate_answer(body.question, context_texts)
+    answer = generation_service.generate_answer(
+        question=body.question,
+        context=context_texts,
+        prompt_key=body.prompt_key,
+        prompt_language=body.prompt_language,
+        temperature=body.temperature
+    )
 
     return schema.ChatResponse(answer=answer)

@@ -2,6 +2,14 @@
 
 Simple fastapi skeleton for a stateless microservice (application for main models, optimization, ...)
 
+## Architecture
+
+The project follows a layered architecture to ensure separation of concerns:
+
+- **v1 (Routes)**: Handles HTTP requests, input validation using Pydantic schemas, and response serialization. This layer is responsible for the API interface.
+- **Services**: Contains the core business logic and orchestrates interactions with external systems such as the Qdrant vector database and LLM providers. This layer is independent of the HTTP transport details.
+
+
 ## Model Preparation
 
 Before running the application, you need to prepare the models by converting them to ONNX format.

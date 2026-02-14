@@ -19,7 +19,7 @@ test:
 	uv run pytest --ignore=tests/e2e
 
 coverage:
-	uv run pytest --cov=src
+	uv run pytest --cov=src --ignore=tests/e2e
 
 
 build:

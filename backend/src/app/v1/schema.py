@@ -109,6 +109,9 @@ class QueryResponse(BaseModel):
 
 class ChatRequest(BaseModel):
     question: str
+    prompt_key: Optional[str] = None
+    prompt_language: Optional[str] = None
+    temperature: Optional[float] = None
 
 
 class ChatResponse(BaseModel):
