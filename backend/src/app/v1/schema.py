@@ -107,6 +107,14 @@ class QueryResponse(BaseModel):
     results: List[SearchResult]
 
 
+class ChatRequest(BaseModel):
+    question: str
+
+
+class ChatResponse(BaseModel):
+    answer: str
+
+
 RankingResponse = QueryResponse
 
 

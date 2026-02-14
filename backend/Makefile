@@ -16,7 +16,7 @@ run:
 	FASTAPI_ENV=TEST ./run_app.sh
 
 test:
-	uv run pytest
+	uv run pytest --ignore=tests/e2e
 
 coverage:
 	uv run pytest --cov=src

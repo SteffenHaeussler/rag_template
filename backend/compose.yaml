@@ -55,4 +55,5 @@ services:
     environment:
       BACKEND_URL: http://backend:8000
       QDRANT_HOST: qdrant
+      KB_HOST: qdrant
     command: bash -c "uv sync --dev && uv run pytest /e2e -v"

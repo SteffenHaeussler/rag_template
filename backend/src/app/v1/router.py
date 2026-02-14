@@ -10,6 +10,10 @@ from qdrant_client.models import Distance, PointStruct, VectorParams
 
 import src.app.v1.schema as schema
 
+
+from src.app.services.retrieval import RetrievalService
+from src.app.services.generation import GenerationService
+
 v1 = APIRouter()
 
 
@@ -49,84 +53,6 @@ def parse_datapoint_id(datapoint_id: str) -> Union[str, int]:
     except ValueError:
         raise HTTPException(status_code=400, detail=f"Invalid datapoint ID: {datapoint_id}. Must be an integer or UUID.")
     return datapoint_id
-
-
-def _embed_text(request: Request, text: str) -> list[float]:
-    """Generate embedding for text using the bi-encoder."""
-    config = request.app.state.config
-    inputs = config.models["bi_tokenizer"](
-        text, padding=True, truncation=True, return_tensors="np"
-    )
-    outputs = config.models["bi_encoder"](**inputs)
-    return np.mean(outputs.last_hidden_state, axis=1).tolist()[0]
-
-
-def _query_qdrant(
-    qdrant: QdrantClient,
-    collection_name: str,
-    vector: List[float],
-    limit: int
-) -> List[schema.QdrantPoint]:
-    """
-    Generic wrapper for Qdrant querying.
-    Returns the raw Qdrant points (ID, Score, Payload).
-    """
-    results = qdrant.query_points(
-        collection_name=collection_name,
-        query=vector,
-        limit=limit,
-    )
-    return [
-        schema.QdrantPoint(
-            id=point.id,
-            score=point.score,
-            payload=point.payload,
-            vector=point.vector,
-        )
-        for point in results.points
-    ]
-
-
-def _rerank_candidates(
-    request: Request,
-    question: str,
-    candidates: List[Dict[str, Any]],
-    top_k: int
-) -> List[schema.SearchResult]:
-    """Sorts candidates by relevance using the Cross-Encoder."""
-
-    if not candidates:
-        return []
-
-    config = request.app.state.config
-    tokenizer = config.models["cross_tokenizer"]
-    model = config.models["cross_encoder"]
-
-    candidate_texts = [c.get("text", "") for c in candidates]
-    pairs = [[question, text] for text in candidate_texts]
-
-    inputs = tokenizer(
-        pairs, padding=True, truncation=True, return_tensors="np"
-    )
-    outputs = model(**inputs)
-
-    # Flatten logits to a 1D array
-    scores = outputs.logits.reshape(-1).tolist()
-
-    ranked_results = []
-    for score, content in zip(scores, candidates):
-        ranked_results.append(
-            schema.SearchResult(
-                text=content.get("text", ""),
-                score=score,
-                metadata=content # Pass full payload as metadata
-            )
-        )
-
-    # Sort descending (Highest score first)
-    ranked_results.sort(key=lambda x: x.score, reverse=True)
-
-    return ranked_results[:top_k]
 
 
 # ==========================================
@@ -174,7 +100,9 @@ def delete_collection(request: Request, collection_name: str = Depends(verify_co
 @v1.post("/collections/{collection_name}/datapoints/", status_code=status.HTTP_201_CREATED, response_model=schema.StatusResponse)
 def insert_datapoint(request: Request, datapoint: schema.DatapointCreate, collection_name: str = Depends(verify_collection), qdrant: QdrantClient = Depends(get_qdrant)):
     point_id = datapoint.id or str(uuid.uuid4())
-    embedding = datapoint.embedding or _embed_text(request, datapoint.text)
+
+    retrieval_service = RetrievalService(request)
+    embedding = datapoint.embedding or retrieval_service._embed_text(datapoint.text)
 
     qdrant.upsert(
         collection_name=collection_name,
@@ -192,10 +120,15 @@ def insert_datapoint(request: Request, datapoint: schema.DatapointCreate, collec
 
 @v1.post("/collections/{collection_name}/datapoints/bulk", status_code=status.HTTP_201_CREATED, response_model=schema.BulkInsertResponse)
 def insert_bulk_datapoints(request: Request, datapoints: List[schema.DatapointCreate], collection_name: str = Depends(verify_collection), qdrant: QdrantClient = Depends(get_qdrant)):
+    retrieval_service = RetrievalService(request)
     points = []
+
+    # Process in batches for embedding if needed (optimization possible here but kept simple for now)
+    # Ideally should batch embed, but for now reuse single embed logic or Service method
+
     for dp in datapoints:
         point_id = dp.id or str(uuid.uuid4())
-        embedding = dp.embedding or _embed_text(request, dp.text)
+        embedding = dp.embedding or retrieval_service._embed_text(dp.text)
         points.append(
             PointStruct(
                 id=point_id,
@@ -264,6 +197,7 @@ def get_datapoint_embedding(request: Request, collection_name: str, datapoint_id
 @v1.put("/collections/{collection_name}/datapoints/{datapoint_id}", response_model=schema.StatusResponse)
 def update_datapoint(request: Request, collection_name: str, datapoint_id: str, update_data: schema.DatapointUpdate, qdrant: QdrantClient = Depends(get_qdrant)):
     datapoint_id = parse_datapoint_id(datapoint_id)
+    retrieval_service = RetrievalService(request)
 
     # Check point exists
     results = qdrant.retrieve(
@@ -283,7 +217,7 @@ def update_datapoint(request: Request, collection_name: str, datapoint_id: str, 
     # Update text and re-embed if changed
     if update_data.text is not None:
         payload["text"] = update_data.text
-        vector = _embed_text(request, update_data.text)
+        vector = retrieval_service._embed_text(update_data.text)
 
     # Merge metadata
     if update_data.metadata is not None:
@@ -313,15 +247,16 @@ def delete_datapoint(request: Request, collection_name: str, datapoint_id: str, 
 
 @v1.post("/embedding/", response_model=schema.EmbeddingResponse)
 def embedding(request: Request, body: schema.EmbeddingRequest) -> schema.EmbeddingResponse:
-    mean_embedding = _embed_text(request, body.text)
+    retrieval_service = RetrievalService(request)
+    mean_embedding = retrieval_service._embed_text(body.text)
     return schema.EmbeddingResponse(text=body.text, embedding=mean_embedding)
 
 
 @v1.post("/ranking/")
 def ranking(request: Request, body: schema.RankingRequest) -> schema.RankingResponse:
+    retrieval_service = RetrievalService(request)
     candidates = [{"text": text} for text in body.texts]
-    ranked_results = _rerank_candidates(
-        request=request,
+    ranked_results = retrieval_service.rerank(
         question=body.question,
         candidates=candidates,
         top_k=len(body.texts),
@@ -335,10 +270,11 @@ def search(request: Request, collection_name: str, body: schema.SearchRequest, q
     config = request.app.state.config
     n_items = body.n_retrieval or config.kb_limit
 
-    points = _query_qdrant(
-            qdrant=qdrant,
+    retrieval_service = RetrievalService(request)
+
+    points = retrieval_service.search(
             collection_name=collection_name,
-            vector=body.embedding,
+            query_vector=body.embedding,
             limit=n_items
         )
 
@@ -356,29 +292,31 @@ def search(request: Request, collection_name: str, body: schema.SearchRequest, q
 
 @v1.post("/query/", response_model=schema.QueryResponse)
 def full_rag_pipeline(request: Request, body: schema.QueryRequest, qdrant: QdrantClient = Depends(get_qdrant)) -> schema.QueryResponse:
-    config = request.app.state.config
-    query_vector = _embed_text(request, body.question)
+    retrieval_service = RetrievalService(request)
 
-    collection = body.collection_name or config.kb_name
-    if not qdrant.collection_exists(collection):
-        raise HTTPException(status_code=404, detail=f"Collection '{collection}' not found")
-    n_retrieval = body.n_retrieval or config.kb_limit
-    n_ranking = body.n_ranking or config.kb_limit
-
-    candidates = _query_qdrant(
-        qdrant=qdrant,
-        vector=query_vector,
-        collection_name=collection,
-        limit=n_retrieval
-    )
-
-    candidates_list = [point.payload or {} for point in candidates]
-
-    final_results = _rerank_candidates(
-        request=request,
+    final_results = retrieval_service.retrieve_context(
         question=body.question,
-        candidates=candidates_list,
-        top_k=n_ranking
+        collection_name=body.collection_name,
+        n_retrieval=body.n_retrieval,
+        n_ranking=body.n_ranking
     )
 
     return schema.QueryResponse(question=body.question, results=final_results)
+
+
+@v1.post("/chat/", response_model=schema.ChatResponse)
+def chat(request: Request, body: schema.ChatRequest, qdrant: QdrantClient = Depends(get_qdrant)) -> schema.ChatResponse:
+    retrieval_service = RetrievalService(request)
+
+    # Retrieve context
+    final_results = retrieval_service.retrieve_context(
+        question=body.question
+    )
+
+    context_texts = [result.text for result in final_results]
+
+    # Generate Answer
+    generation_service = GenerationService(request)
+    answer = generation_service.generate_answer(body.question, context_texts)
+
+    return schema.ChatResponse(answer=answer)

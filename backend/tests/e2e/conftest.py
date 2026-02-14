@@ -9,9 +9,15 @@ def backend_url():
     return os.getenv("BACKEND_URL", "http://localhost:8000")
 
 @pytest.fixture(scope="session")
-def qdrant_host():
+def config():
+    """Application configuration."""
+    from src.app.config import Config
+    return Config()
+
+@pytest.fixture(scope="session")
+def qdrant_host(config):
     """Hostname for Qdrant service."""
-    return os.getenv("QDRANT_HOST", "localhost")
+    return config.kb_host
 
 @pytest.fixture(scope="session")
 def qdrant_client(qdrant_host):

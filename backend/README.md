@@ -2,6 +2,23 @@
 
 Simple fastapi skeleton for a stateless microservice (application for main models, optimization, ...)
 
+## Model Preparation
+
+Before running the application, you need to prepare the models by converting them to ONNX format.
+
+1. Ensure your environment variables are set correctly in `dev.env` (or your active environment file). Specifically check `bi_encoder` and `cross_encoder`.
+2. Run the conversion script:
+
+```bash
+uv run python scripts/onnx_conversion.py
+```
+
+3. Verify the models are working correctly:
+
+```bash
+uv run python scripts/onnx_test.py
+```
+
 ## Running service manually
 
 To run the service manually in debug mode ensure you have `uv` installed.
@@ -52,3 +69,19 @@ make test
 Or directly with uv:
 
 `uv run pytest`
+
+## End-to-End Testing
+
+End-to-end tests verify the entire application flow, including the database and other services.
+
+To run local e2e tests (requires services to be running):
+
+```bash
+make test-e2e
+```
+
+To run e2e tests in a Docker environment (spins up necessary containers):
+
+```bash
+make test-docker
+```
