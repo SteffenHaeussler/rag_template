@@ -305,12 +305,31 @@ def full_rag_pipeline(request: Request, body: schema.QueryRequest, qdrant: Qdran
 
 
 @v1.post("/chat/", response_model=schema.ChatResponse)
-def chat(request: Request, body: schema.ChatRequest, qdrant: QdrantClient = Depends(get_qdrant)) -> schema.ChatResponse:
+def chat(request: Request, body: schema.ChatRequest) -> schema.ChatResponse:
+    """Generate answer from provided context (no retrieval)."""
+    generation_service = GenerationService(request)
+    answer = generation_service.generate_answer(
+        question=body.question,
+        context=body.context,
+        prompt_key=body.prompt_key,
+        prompt_language=body.prompt_language,
+        temperature=body.temperature
+    )
+
+    return schema.ChatResponse(answer=answer)
+
+
+@v1.post("/rag/", response_model=schema.ChatResponse)
+def rag(request: Request, body: schema.RagRequest, qdrant: QdrantClient = Depends(get_qdrant)) -> schema.ChatResponse:
+    """Full RAG pipeline: Retrieve context from collection + Generate answer."""
     retrieval_service = RetrievalService(request)
 
     # Retrieve context
     final_results = retrieval_service.retrieve_context(
-        question=body.question
+        question=body.question,
+        collection_name=body.collection_name,
+        n_retrieval=body.n_retrieval,
+        n_ranking=body.n_ranking
     )
 
     context_texts = [result.text for result in final_results]

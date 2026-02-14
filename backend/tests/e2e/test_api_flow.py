@@ -9,7 +9,7 @@ def test_rag_lifecycle(http_client: Client):
     3. Retrieval & Search
     4. Cleanup
     """
-    COLLECTION_NAME = "e2e_test_collection"
+    COLLECTION_NAME = "temp"
 
     # 1. Create Collection
     payload = {

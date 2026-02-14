@@ -1,4 +1,5 @@
 import importlib.metadata
+import os
 from pathlib import Path
 from typing import Dict
 
@@ -7,7 +8,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Config(BaseSettings):
-    _env_file: str = "dev.env"
+    _env_file: str = os.getenv("ENV_FILE", "dev.env")
 
     # workaround for storing db items
     models: Dict = {}
@@ -42,7 +43,7 @@ class Config(BaseSettings):
         env_file=_env_file,
         env_file_encoding="utf-8",
         extra="ignore",
-        case_sensitive=False
+        case_sensitive=False,
     )
 
     @property

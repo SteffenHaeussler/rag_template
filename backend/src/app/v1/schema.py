@@ -109,6 +109,17 @@ class QueryResponse(BaseModel):
 
 class ChatRequest(BaseModel):
     question: str
+    context: List[str]
+    prompt_key: Optional[str] = None
+    prompt_language: Optional[str] = None
+    temperature: Optional[float] = None
+
+
+class RagRequest(BaseModel):
+    question: str
+    collection_name: str
+    n_retrieval: Optional[int] = None
+    n_ranking: Optional[int] = None
     prompt_key: Optional[str] = None
     prompt_language: Optional[str] = None
     temperature: Optional[float] = None

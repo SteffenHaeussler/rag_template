@@ -7,7 +7,7 @@ all: down build up test
 
 dev:
 	@echo "Setting FASTAPI_ENV to DEV and running application..."
-	FASTAPI_ENV=DEV ./run_app.sh
+	KB_HOST=localhost FASTAPI_ENV=DEV ./run_app.sh
 prod:
 	@echo "Setting FASTAPI_ENV to PROD and running application..."
 	FASTAPI_ENV=PROD ./run_app.sh
@@ -28,6 +28,9 @@ build:
 up:
 	docker compose up -d
 
+up-qdrant:
+	docker compose up -d qdrant
+
 down:
 	docker compose down --remove-orphans
 
@@ -37,7 +40,7 @@ notebook:
 nb: notebook
 
 test-e2e:
-	uv run pytest tests/e2e
+	KB_HOST=localhost uv run pytest tests/e2e -s
 
 test-docker:
 	docker compose -f compose.yaml --profile test up tests --build --abort-on-container-exit --exit-code-from tests

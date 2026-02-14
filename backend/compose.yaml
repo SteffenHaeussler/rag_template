@@ -10,7 +10,8 @@ services:
       - "8000:8000"
     restart: unless-stopped
     environment:
-      KB_HOST: "qdrant"
+      kb_host: "qdrant"
+      prompt_path: "prompts/generation.yaml"
     volumes:
       - ./models:/app/models
     healthcheck:
@@ -44,7 +45,7 @@ services:
       context: .
     profiles:
       - test
-    env_file: .env
+    env_file: e2e.env
     depends_on:
       backend:
         condition: service_healthy
@@ -54,6 +55,4 @@ services:
       - ./tests/e2e:/e2e
     environment:
       BACKEND_URL: http://backend:8000
-      QDRANT_HOST: qdrant
-      KB_HOST: qdrant
     command: bash -c "uv sync --dev && uv run pytest /e2e -v"
