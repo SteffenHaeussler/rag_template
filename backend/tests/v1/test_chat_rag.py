@@ -67,7 +67,7 @@ def test_chat_missing_question(client):
     }
     response = client.post("/v1/chat/", json=payload)
 
-    assert response.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
+    assert response.status_code == status.HTTP_422_UNPROCESSABLE_CONTENT
 
 
 def test_chat_missing_context(client):
@@ -77,7 +77,7 @@ def test_chat_missing_context(client):
     }
     response = client.post("/v1/chat/", json=payload)
 
-    assert response.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
+    assert response.status_code == status.HTTP_422_UNPROCESSABLE_CONTENT
 
 
 def test_chat_empty_context(client):
@@ -188,7 +188,7 @@ def test_rag_missing_collection_name(client):
     }
     response = client.post("/v1/rag/", json=payload)
 
-    assert response.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
+    assert response.status_code == status.HTTP_422_UNPROCESSABLE_CONTENT
 
 
 def test_rag_missing_question(client):
@@ -198,7 +198,7 @@ def test_rag_missing_question(client):
     }
     response = client.post("/v1/rag/", json=payload)
 
-    assert response.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
+    assert response.status_code == status.HTTP_422_UNPROCESSABLE_CONTENT
 
 
 def test_rag_collection_not_found(client, mock_qdrant):

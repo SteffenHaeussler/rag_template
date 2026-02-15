@@ -27,6 +27,38 @@ uv run python scripts/onnx_conversion.py
 uv run python scripts/onnx_test.py
 ```
 
+## Data Ingestion
+
+After model preparation and before using the RAG endpoints, you need to ingest your documents into Qdrant.
+
+### Quick Start
+
+**IMPORTANT**: The API must be running before ingestion!
+
+```bash
+# 1. Start the API (if not already running)
+make dev
+
+# 2. In a new terminal, run the ingestion script
+cd backend
+uv run python scripts/ingest_documents.py
+```
+
+This will:
+- Load all markdown files from `../data/`
+- Chunk them into ~500 character pieces with 50-character overlap
+- Call the API to generate embeddings and insert into Qdrant
+- Store metadata (filename, filepath, chunk index)
+
+### Advanced Usage
+
+See [INGESTION.md](./INGESTION.md) for:
+- Interactive notebook for exploration
+- Custom chunking parameters
+- API-based ingestion details
+- Metadata structure
+- Troubleshooting guide
+
 ## Running service manually
 
 To run the service manually in debug mode ensure you have `uv` installed.

@@ -40,7 +40,7 @@ notebook:
 nb: notebook
 
 test-e2e:
-	KB_HOST=localhost uv run pytest tests/e2e -s
+	KB_HOST=localhost uv run pytest tests/e2e
 
 test-docker:
 	docker compose -f compose.yaml --profile test up tests --build --abort-on-container-exit --exit-code-from tests
