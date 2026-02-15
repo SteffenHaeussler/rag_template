@@ -3,12 +3,12 @@ import os
 from pathlib import Path
 from typing import Dict
 
-from pydantic import Field, constr
+from pydantic import Field, constr, AliasChoices
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Config(BaseSettings):
-    _env_file: str = os.getenv("ENV_FILE", "dev.env")
+    _env_file: str = os.getenv("ENV_FILE", ".env")
 
     # workaround for storing db items
     models: Dict = {}
@@ -25,7 +25,7 @@ class Config(BaseSettings):
     cross_encoder: str
     cross_encoder_path: str
 
-    llm_api_key: str
+    llm_api_key: str = Field(validation_alias=AliasChoices("GEMINI_API_KEY"))
     generation_model: str
     temperature: float = 0.0
 
@@ -51,9 +51,9 @@ class Config(BaseSettings):
         return dict(self).get("FASTAPI_ENV")
 
     def model_post_init(self, __context):
-        import os
-        import litellm
-        litellm.api_key = self.llm_api_key
-        print(f"DEBUG CONFIG: kb_host={self.kb_host}, api_mode={self.api_mode}")
-        print(f"DEBUG ENV: KB_HOST={os.getenv('KB_HOST')}, kb_host={os.getenv('kb_host')}")
+        # Set the API key as an environment variable for provider-specific lookup
+        os.environ["GEMINI_API_KEY"] = self.llm_api_key
+        # print(f"DEBUG CONFIG: kb_host={self.kb_host}, api_mode={self.api_mode}")
+        # print(f"DEBUG ENV: KB_HOST={os.getenv('KB_HOST')}, kb_host={os.getenv('kb_host')}")
+        # print(f"DEBUG: Config initialized. llm_api_key (first 5 chars): {self.llm_api_key[:5] if self.llm_api_key else 'None'}...")
 

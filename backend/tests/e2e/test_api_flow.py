@@ -99,10 +99,14 @@ def test_rag_lifecycle(http_client: Client):
     response = http_client.post("/v1/query/", json=query_request)
     assert response.status_code == 200
     assert "results" in response.json()
+    query_results = response.json()["results"]
 
     # 9. Chat / Generation
+    # Extract context from query results
+    context = [result["text"] for result in query_results]
     chat_payload = {
         "question": "What is the primary language for AI?",
+        "context": context,
         "temperature": 0.1
     }
     # Note: This might fail if LLM API key is not configured in the running backend
