@@ -1,4 +1,5 @@
 #!/usr/bin/env python
+import os
 from contextlib import asynccontextmanager
 from os import getenv
 from typing import Dict
@@ -58,6 +59,9 @@ def get_application(config: Config) -> FastAPI:
 
 Config._env_file = (f"{getenv('FASTAPI_ENV', 'dev')}.env",)
 config = Config()
+
+# Set API key as environment variable for provider-specific lookup
+os.environ["GEMINI_API_KEY"] = config.llm_api_key
 
 setup_logger(config.api_mode)
 app = get_application(config)

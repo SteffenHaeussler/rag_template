@@ -8,8 +8,9 @@ from src.app.context import ctx_request_id
 
 
 def request_id_filter(record):
+    """Add request_id to log record from context variable."""
     record["request_id"] = ctx_request_id.get()
-    return record["request_id"]
+    return True  # Loguru filters expect bool return value
 
 
 class InterceptHandler(logging.Handler):

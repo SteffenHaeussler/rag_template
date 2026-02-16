@@ -47,10 +47,3 @@ class Config(BaseSettings):
     def api_mode(self) -> str:
         return dict(self).get("FASTAPI_ENV")
 
-    def model_post_init(self, __context):
-        # Set the API key as an environment variable for provider-specific lookup
-        os.environ["GEMINI_API_KEY"] = self.llm_api_key
-        # print(f"DEBUG CONFIG: kb_host={self.kb_host}, api_mode={self.api_mode}")
-        # print(f"DEBUG ENV: KB_HOST={os.getenv('KB_HOST')}, kb_host={os.getenv('kb_host')}")
-        # print(f"DEBUG: Config initialized. llm_api_key (first 5 chars): {self.llm_api_key[:5] if self.llm_api_key else 'None'}...")
-

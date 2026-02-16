@@ -37,10 +37,12 @@ DISTANCE_MAP = {
 
 
 def get_qdrant(request: Request) -> QdrantClient:
+    """Get Qdrant client from request state."""
     return request.app.state.qdrant
 
 
 def verify_collection(collection_name: str, qdrant: QdrantClient = Depends(get_qdrant)) -> str:
+    """Verify that collection exists, raise 404 if not."""
     if not qdrant.collection_exists(collection_name):
         raise HTTPException(status_code=404, detail="Collection not found")
     return collection_name
@@ -52,7 +54,17 @@ def verify_collection(collection_name: str, qdrant: QdrantClient = Depends(get_q
 
 
 def validate_embedding_dimension(embedding: List[float], collection_name: str, qdrant: QdrantClient) -> None:
-    """Validate that embedding dimension matches collection configuration."""
+    """
+    Validate that embedding dimension matches collection configuration.
+
+    Args:
+        embedding: Embedding vector to validate
+        collection_name: Name of the collection
+        qdrant: Qdrant client instance
+
+    Raises:
+        HTTPException: If dimension doesn't match collection config
+    """
     collection_info = qdrant.get_collection(collection_name)
     expected_dim = collection_info.config.params.vectors.size
     actual_dim = len(embedding)

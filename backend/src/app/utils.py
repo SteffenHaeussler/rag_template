@@ -1,3 +1,4 @@
+from typing import Dict, Any
 from optimum.onnxruntime import (
     ORTModelForFeatureExtraction,
     ORTModelForSequenceClassification,
@@ -5,7 +6,18 @@ from optimum.onnxruntime import (
 from transformers import AutoTokenizer
 
 
-def load_models(rootdir, bi_encoder_path, cross_encoder_path):
+def load_models(rootdir: str, bi_encoder_path: str, cross_encoder_path: str) -> Dict[str, Any]:
+    """
+    Load ONNX models for embedding and reranking.
+
+    Args:
+        rootdir: Root directory path
+        bi_encoder_path: Path to bi-encoder model
+        cross_encoder_path: Path to cross-encoder model
+
+    Returns:
+        Dictionary containing models and tokenizers
+    """
     models = {}
 
     models["bi_encoder"] = ORTModelForFeatureExtraction.from_pretrained(

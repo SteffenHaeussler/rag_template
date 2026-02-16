@@ -1,6 +1,6 @@
 import sys
 from pathlib import Path
-from typing import List, Dict
+from typing import List, Dict, Any
 import httpx
 
 
@@ -38,7 +38,7 @@ class DocumentIngester:
         if verify_api:
             self._verify_api()
 
-    def _verify_api(self) -> Dict[str, any]:
+    def _verify_api(self) -> Dict[str, Any]:
         """
         Verify the API is accessible.
 
