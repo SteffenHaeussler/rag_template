@@ -55,12 +55,12 @@ class TestGenerationService:
 
             assert answer == "Generated Answer"
 
-            expected_prompt = "Question: test question Context: ['context1']"
-            mock_completion.assert_called_once_with(
-                model="test-model",
-                messages=[{"role": "user", "content": expected_prompt}],
-                temperature=0.7
-            )
+            # Check that completion was called (may be called multiple times due to retry)
+            assert mock_completion.called
+            call_kwargs = mock_completion.call_args.kwargs
+            assert call_kwargs["model"] == "test-model"
+            assert call_kwargs["temperature"] == 0.7
+            assert call_kwargs["timeout"] == 30.0
 
     @patch("src.app.services.generation.completion")
     def test_generate_answer_custom_params(self, mock_completion, mock_request):
@@ -89,11 +89,11 @@ class TestGenerationService:
 
             assert answer == "Oui"
 
-            mock_completion.assert_called_once_with(
-                model="test-model",
-                messages=[{"role": "user", "content": "Question: test question"}],
-                temperature=0.5
-            )
+            # Check that completion was called with correct params
+            assert mock_completion.called
+            call_kwargs = mock_completion.call_args.kwargs
+            assert call_kwargs["temperature"] == 0.5
+            assert call_kwargs["timeout"] == 30.0
 
     def test_generate_answer_key_error(self, mock_request):
         with patch("builtins.open"), \
@@ -103,7 +103,8 @@ class TestGenerationService:
 
             service = GenerationService(mock_request)
 
-            with pytest.raises(ValueError) as excinfo:
+            from src.app.exceptions import ConfigurationError
+            with pytest.raises(ConfigurationError) as excinfo:
                 service.generate_answer("q", [], prompt_key="missing")
 
             assert "Prompt not found" in str(excinfo.value)

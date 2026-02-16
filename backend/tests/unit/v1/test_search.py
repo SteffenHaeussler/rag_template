@@ -52,6 +52,9 @@ def test_search(client, mock_qdrant):
 
 
 def test_full_rag_pipeline(client, mock_qdrant, mock_models):
+    # Mock collection exists (required for new error handling)
+    mock_qdrant.collection_exists.return_value = True
+
     # Mock retrieval
     mock_point = MagicMock()
     mock_point.id = "uuid-1"
@@ -60,7 +63,11 @@ def test_full_rag_pipeline(client, mock_qdrant, mock_models):
     mock_search_result.points = [mock_point]
     mock_qdrant.query_points.return_value = mock_search_result
 
-    # Mock reranking is handled by mock_models fixture returning logits
+    # Override cross-encoder to return correct number of scores (1 score for 1 candidate)
+    import numpy as np
+    cross_output = MagicMock()
+    cross_output.logits = np.array([0.9])  # 1 score for 1 candidate
+    mock_models["cross_encoder"].return_value = cross_output
 
     payload = {
         "question": "test query",

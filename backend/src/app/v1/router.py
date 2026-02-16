@@ -5,14 +5,21 @@ from typing import Any, Dict, List, Union
 import numpy as np
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from qdrant_client import QdrantClient
+from loguru import logger
 
 from qdrant_client.models import Distance, PointStruct, VectorParams
 
 import src.app.v1.schema as schema
 
-
 from src.app.services.retrieval import RetrievalService
 from src.app.services.generation import GenerationService
+from src.app.exceptions import (
+    EmbeddingError,
+    RerankingError,
+    GenerationError,
+    VectorDBError,
+    ConfigurationError,
+)
 
 v1 = APIRouter()
 
@@ -142,60 +149,93 @@ def delete_collection(request: Request, collection_name: str = Depends(verify_co
 
 @v1.post("/collections/{collection_name}/datapoints/", status_code=status.HTTP_201_CREATED, response_model=schema.StatusResponse)
 def insert_datapoint(request: Request, datapoint: schema.DatapointCreate, collection_name: str = Depends(verify_collection), qdrant: QdrantClient = Depends(get_qdrant)):
-    point_id = datapoint.id or str(uuid.uuid4())
+    """Insert a single datapoint into collection."""
+    try:
+        point_id = datapoint.id or str(uuid.uuid4())
 
-    retrieval_service = RetrievalService(request)
-    embedding = datapoint.embedding or retrieval_service._embed_text(datapoint.text)
+        retrieval_service = RetrievalService(request)
+        embedding = datapoint.embedding or retrieval_service._embed_text(datapoint.text)
 
-    # Validate embedding dimension
-    validate_embedding_dimension(embedding, collection_name, qdrant)
+        # Validate embedding dimension
+        validate_embedding_dimension(embedding, collection_name, qdrant)
 
-    qdrant.upsert(
-        collection_name=collection_name,
-        points=[
-            PointStruct(
-                id=point_id,
-                vector=embedding,
-                payload={"text": datapoint.text, **datapoint.metadata},
-            )
-        ],
-    )
+        qdrant.upsert(
+            collection_name=collection_name,
+            points=[
+                PointStruct(
+                    id=point_id,
+                    vector=embedding,
+                    payload={"text": datapoint.text, **datapoint.metadata},
+                )
+            ],
+        )
 
-    return schema.StatusResponse(id=point_id, status="inserted")
+        return schema.StatusResponse(id=point_id, status="inserted")
+
+    except EmbeddingError as e:
+        logger.error(f"Failed to embed datapoint: {e.message}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to generate embedding: {e.message}"
+        )
+    except Exception as e:
+        logger.error(f"Failed to insert datapoint: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to insert datapoint: {str(e)}"
+        )
 
 
 @v1.post("/collections/{collection_name}/datapoints/bulk", status_code=status.HTTP_201_CREATED, response_model=schema.BulkInsertResponse)
 def insert_bulk_datapoints(request: Request, datapoints: List[schema.DatapointCreate], collection_name: str = Depends(verify_collection), qdrant: QdrantClient = Depends(get_qdrant)):
-    retrieval_service = RetrievalService(request)
-    points = []
+    """Insert multiple datapoints in bulk."""
+    try:
+        retrieval_service = RetrievalService(request)
+        points = []
 
-    # Process in batches for embedding if needed (optimization possible here but kept simple for now)
-    # Ideally should batch embed, but for now reuse single embed logic or Service method
+        # Process in batches for embedding if needed (optimization possible here but kept simple for now)
+        # Ideally should batch embed, but for now reuse single embed logic or Service method
 
-    for dp in datapoints:
-        point_id = dp.id or str(uuid.uuid4())
-        embedding = dp.embedding or retrieval_service._embed_text(dp.text)
+        for idx, dp in enumerate(datapoints):
+            try:
+                point_id = dp.id or str(uuid.uuid4())
+                embedding = dp.embedding or retrieval_service._embed_text(dp.text)
 
-        # Validate embedding dimension (do this before adding to points list)
-        validate_embedding_dimension(embedding, collection_name, qdrant)
+                # Validate embedding dimension (do this before adding to points list)
+                validate_embedding_dimension(embedding, collection_name, qdrant)
 
-        points.append(
-            PointStruct(
-                id=point_id,
-                vector=embedding,
-                payload={"text": dp.text, **dp.metadata},
+                points.append(
+                    PointStruct(
+                        id=point_id,
+                        vector=embedding,
+                        payload={"text": dp.text, **dp.metadata},
+                    )
+                )
+            except EmbeddingError as e:
+                logger.error(f"Failed to embed datapoint {idx}: {e.message}")
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail=f"Failed to embed datapoint at index {idx}: {e.message}"
+                )
+
+        # Batch upsert
+        batch_size = request.app.state.config.kb_batch_size
+        for i in range(0, len(points), batch_size):
+            qdrant.upsert(
+                collection_name=collection_name,
+                points=points[i : i + batch_size],
             )
-        )
 
-    # Batch upsert
-    batch_size = request.app.state.config.kb_batch_size
-    for i in range(0, len(points), batch_size):
-        qdrant.upsert(
-            collection_name=collection_name,
-            points=points[i : i + batch_size],
-        )
+        return schema.BulkInsertResponse(inserted_count=len(points))
 
-    return schema.BulkInsertResponse(inserted_count=len(points))
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Bulk insert failed: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Bulk insert failed: {str(e)}"
+        )
 
 
 # ==========================================
@@ -246,39 +286,56 @@ def get_datapoint_embedding(request: Request, collection_name: str, datapoint_id
 
 @v1.put("/collections/{collection_name}/datapoints/{datapoint_id}", response_model=schema.StatusResponse)
 def update_datapoint(request: Request, collection_name: str, datapoint_id: str, update_data: schema.DatapointUpdate, qdrant: QdrantClient = Depends(get_qdrant)):
-    datapoint_id = parse_datapoint_id(datapoint_id)
-    retrieval_service = RetrievalService(request)
+    """Update an existing datapoint."""
+    try:
+        datapoint_id = parse_datapoint_id(datapoint_id)
+        retrieval_service = RetrievalService(request)
 
-    # Check point exists
-    results = qdrant.retrieve(
-        collection_name=collection_name,
-        ids=[datapoint_id],
-        with_payload=True,
-        with_vectors=True,
-    )
+        # Check point exists
+        results = qdrant.retrieve(
+            collection_name=collection_name,
+            ids=[datapoint_id],
+            with_payload=True,
+            with_vectors=True,
+        )
 
-    if not results:
-        raise HTTPException(status_code=404, detail="Datapoint not found")
+        if not results:
+            raise HTTPException(status_code=404, detail="Datapoint not found")
 
-    existing = results[0]
-    payload = existing.payload or {}
-    vector = existing.vector
+        existing = results[0]
+        payload = existing.payload or {}
+        vector = existing.vector
 
-    # Update text and re-embed if changed
-    if update_data.text is not None:
-        payload["text"] = update_data.text
-        vector = retrieval_service._embed_text(update_data.text)
+        # Update text and re-embed if changed
+        if update_data.text is not None:
+            payload["text"] = update_data.text
+            vector = retrieval_service._embed_text(update_data.text)
 
-    # Merge metadata
-    if update_data.metadata is not None:
-        payload.update(update_data.metadata)
+        # Merge metadata
+        if update_data.metadata is not None:
+            payload.update(update_data.metadata)
 
-    qdrant.upsert(
-        collection_name=collection_name,
-        points=[PointStruct(id=datapoint_id, vector=vector, payload=payload)],
-    )
+        qdrant.upsert(
+            collection_name=collection_name,
+            points=[PointStruct(id=datapoint_id, vector=vector, payload=payload)],
+        )
 
-    return schema.StatusResponse(id=datapoint_id, status="updated")
+        return schema.StatusResponse(id=datapoint_id, status="updated")
+
+    except HTTPException:
+        raise
+    except EmbeddingError as e:
+        logger.error(f"Failed to embed updated text: {e.message}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to generate embedding for updated text: {e.message}"
+        )
+    except Exception as e:
+        logger.error(f"Failed to update datapoint: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to update datapoint: {str(e)}"
+        )
 
 
 @v1.delete("/collections/{collection_name}/datapoints/{datapoint_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -297,104 +354,163 @@ def delete_datapoint(request: Request, collection_name: str, datapoint_id: str, 
 
 @v1.post("/embedding/", response_model=schema.EmbeddingResponse)
 def embedding(request: Request, body: schema.EmbeddingRequest) -> schema.EmbeddingResponse:
-    retrieval_service = RetrievalService(request)
-    mean_embedding = retrieval_service._embed_text(body.text)
-    return schema.EmbeddingResponse(text=body.text, embedding=mean_embedding)
+    """Generate embedding for text."""
+    try:
+        retrieval_service = RetrievalService(request)
+        mean_embedding = retrieval_service._embed_text(body.text)
+        return schema.EmbeddingResponse(text=body.text, embedding=mean_embedding)
+    except EmbeddingError as e:
+        logger.error(f"Embedding generation failed: {e.message}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to generate embedding: {e.message}"
+        )
 
 
 @v1.post("/ranking/")
 def ranking(request: Request, body: schema.RankingRequest) -> schema.RankingResponse:
-    retrieval_service = RetrievalService(request)
-    candidates = [{"text": text} for text in body.texts]
-    ranked_results = retrieval_service.rerank(
-        question=body.question,
-        candidates=candidates,
-        top_k=len(body.texts),
-    )
+    """Rerank texts by relevance to question."""
+    try:
+        retrieval_service = RetrievalService(request)
+        candidates = [{"text": text} for text in body.texts]
+        ranked_results = retrieval_service.rerank(
+            question=body.question,
+            candidates=candidates,
+            top_k=len(body.texts),
+        )
 
-    return schema.RankingResponse(question=body.question, results=ranked_results)
+        return schema.RankingResponse(question=body.question, results=ranked_results)
+    except RerankingError as e:
+        logger.error(f"Reranking failed: {e.message}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to rerank results: {e.message}"
+        )
 
 
 @v1.post("/collections/{collection_name}/search/", response_model=schema.SearchResponse)
 def search(request: Request, collection_name: str, body: schema.SearchRequest, qdrant: QdrantClient = Depends(get_qdrant)) -> schema.SearchResponse:
-    config = request.app.state.config
-    n_items = body.n_retrieval or config.kb_limit
+    """Search collection using embedding vector."""
+    try:
+        config = request.app.state.config
+        n_items = body.n_retrieval or config.kb_limit
 
-    # Validate embedding dimension
-    validate_embedding_dimension(body.embedding, collection_name, qdrant)
+        # Validate embedding dimension
+        validate_embedding_dimension(body.embedding, collection_name, qdrant)
 
-    retrieval_service = RetrievalService(request)
+        retrieval_service = RetrievalService(request)
 
-    points = retrieval_service.search(
-            collection_name=collection_name,
-            query_vector=body.embedding,
-            limit=n_items
+        points = retrieval_service.search(
+                collection_name=collection_name,
+                query_vector=body.embedding,
+                limit=n_items
+            )
+
+        response_data = []
+        for point in points:
+            payload = point.payload or {}
+            text = payload.pop("text", "")
+            metadata = {"id": point.id, **payload}
+            response_data.append(
+                schema.SearchResult(text=text, score=point.score, metadata=metadata)
+            )
+
+        return schema.SearchResponse(results=response_data)
+    except VectorDBError as e:
+        logger.error(f"Vector search failed: {e.message}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Search operation failed: {e.message}"
         )
-
-    response_data = []
-    for point in points:
-        payload = point.payload or {}
-        text = payload.pop("text", "")
-        metadata = {"id": point.id, **payload}
-        response_data.append(
-            schema.SearchResult(text=text, score=point.score, metadata=metadata)
-        )
-
-    return schema.SearchResponse(results=response_data)
 
 
 @v1.post("/query/", response_model=schema.QueryResponse)
 def full_rag_pipeline(request: Request, body: schema.QueryRequest, qdrant: QdrantClient = Depends(get_qdrant)) -> schema.QueryResponse:
-    retrieval_service = RetrievalService(request)
+    """Retrieve context: embed query, search, and rerank."""
+    try:
+        retrieval_service = RetrievalService(request)
 
-    final_results = retrieval_service.retrieve_context(
-        question=body.question,
-        collection_name=body.collection_name,
-        n_retrieval=body.n_retrieval,
-        n_ranking=body.n_ranking
-    )
+        final_results = retrieval_service.retrieve_context(
+            question=body.question,
+            collection_name=body.collection_name,
+            n_retrieval=body.n_retrieval,
+            n_ranking=body.n_ranking
+        )
 
-    return schema.QueryResponse(question=body.question, results=final_results)
+        return schema.QueryResponse(question=body.question, results=final_results)
+    except (EmbeddingError, VectorDBError, RerankingError) as e:
+        logger.error(f"Query pipeline failed: {e.message}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Query failed: {e.message}"
+        )
 
 
 @v1.post("/chat/", response_model=schema.ChatResponse)
 def chat(request: Request, body: schema.ChatRequest) -> schema.ChatResponse:
     """Generate answer from provided context (no retrieval)."""
-    generation_service = GenerationService(request)
-    answer = generation_service.generate_answer(
-        question=body.question,
-        context=body.context,
-        prompt_key=body.prompt_key,
-        prompt_language=body.prompt_language,
-        temperature=body.temperature
-    )
+    try:
+        generation_service = GenerationService(request)
+        answer = generation_service.generate_answer(
+            question=body.question,
+            context=body.context,
+            prompt_key=body.prompt_key,
+            prompt_language=body.prompt_language,
+            temperature=body.temperature
+        )
 
-    return schema.ChatResponse(answer=answer)
+        return schema.ChatResponse(answer=answer)
+    except ConfigurationError as e:
+        logger.error(f"Configuration error in chat: {e.message}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Configuration error: {e.message}"
+        )
+    except GenerationError as e:
+        logger.error(f"Answer generation failed: {e.message}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to generate answer: {e.message}"
+        )
 
 
 @v1.post("/rag/", response_model=schema.ChatResponse)
 def rag(request: Request, body: schema.RagRequest, qdrant: QdrantClient = Depends(get_qdrant)) -> schema.ChatResponse:
     """Full RAG pipeline: Retrieve context from collection + Generate answer."""
-    retrieval_service = RetrievalService(request)
+    try:
+        retrieval_service = RetrievalService(request)
 
-    # Retrieve context
-    final_results = retrieval_service.retrieve_context(
-        question=body.question,
-        collection_name=body.collection_name,
-        n_retrieval=body.n_retrieval,
-        n_ranking=body.n_ranking
-    )
+        # Retrieve context
+        final_results = retrieval_service.retrieve_context(
+            question=body.question,
+            collection_name=body.collection_name,
+            n_retrieval=body.n_retrieval,
+            n_ranking=body.n_ranking
+        )
 
-    context_texts = [result.text for result in final_results]
+        context_texts = [result.text for result in final_results]
 
-    # Generate Answer
-    generation_service = GenerationService(request)
-    answer = generation_service.generate_answer(
-        question=body.question,
-        context=context_texts,
-        prompt_key=body.prompt_key,
-        prompt_language=body.prompt_language,
-        temperature=body.temperature
-    )
+        # Generate Answer
+        generation_service = GenerationService(request)
+        answer = generation_service.generate_answer(
+            question=body.question,
+            context=context_texts,
+            prompt_key=body.prompt_key,
+            prompt_language=body.prompt_language,
+            temperature=body.temperature
+        )
 
-    return schema.ChatResponse(answer=answer)
+        return schema.ChatResponse(answer=answer)
+
+    except (EmbeddingError, VectorDBError, RerankingError) as e:
+        logger.error(f"RAG retrieval failed: {e.message}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to retrieve context: {e.message}"
+        )
+    except (ConfigurationError, GenerationError) as e:
+        logger.error(f"RAG generation failed: {e.message}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to generate answer: {e.message}"
+        )
