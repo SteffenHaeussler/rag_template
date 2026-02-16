@@ -13,7 +13,7 @@ from src.app.exceptions import EmbeddingError, RerankingError, VectorDBError
 def mock_request():
     """Create mock request with config and models."""
     request = MagicMock()
-    request.app.state.config.models = {
+    request.app.state.models = {
         "bi_tokenizer": MagicMock(),
         "bi_encoder": MagicMock(),
         "cross_tokenizer": MagicMock(),
@@ -44,7 +44,7 @@ class TestEmbedText:
 
     def test_embed_with_missing_tokenizer(self, mock_request):
         """Test embedding with missing tokenizer."""
-        mock_request.app.state.config.models = {}
+        mock_request.app.state.models = {}  # Empty models dict
         service = RetrievalService(mock_request)
 
         with pytest.raises(EmbeddingError, match="Model configuration error"):
@@ -53,7 +53,7 @@ class TestEmbedText:
     def test_embed_with_tokenizer_error(self, mock_request):
         """Test embedding when tokenizer fails."""
         service = RetrievalService(mock_request)
-        mock_request.app.state.config.models["bi_tokenizer"].side_effect = Exception("Tokenizer failed")
+        mock_request.app.state.models["bi_tokenizer"].side_effect = Exception("Tokenizer failed")
 
         with pytest.raises(EmbeddingError, match="Failed to generate embedding"):
             service._embed_text("test text")
@@ -63,8 +63,8 @@ class TestEmbedText:
         service = RetrievalService(mock_request)
 
         # Mock tokenizer success but model failure
-        mock_request.app.state.config.models["bi_tokenizer"].return_value = {"input_ids": []}
-        mock_request.app.state.config.models["bi_encoder"].side_effect = RuntimeError("Model inference failed")
+        mock_request.app.state.models["bi_tokenizer"].return_value = {"input_ids": []}
+        mock_request.app.state.models["bi_encoder"].side_effect = RuntimeError("Model inference failed")
 
         with pytest.raises(EmbeddingError, match="Failed to generate embedding"):
             service._embed_text("test text")
@@ -75,8 +75,8 @@ class TestEmbedText:
 
         # Mock model output without last_hidden_state
         mock_output = MagicMock(spec=[])  # No last_hidden_state attribute
-        mock_request.app.state.config.models["bi_tokenizer"].return_value = {"input_ids": []}
-        mock_request.app.state.config.models["bi_encoder"].return_value = mock_output
+        mock_request.app.state.models["bi_tokenizer"].return_value = {"input_ids": []}
+        mock_request.app.state.models["bi_encoder"].return_value = mock_output
 
         with pytest.raises(EmbeddingError, match="missing 'last_hidden_state'"):
             service._embed_text("test text")
@@ -99,17 +99,18 @@ class TestEmbedText:
         """Test successful embedding generation."""
         service = RetrievalService(mock_request)
 
-        # Mock successful embedding
+        # Mock successful embedding - needs proper shape for mean pooling
         mock_output = MagicMock()
-        mock_output.last_hidden_state = np.array([[[0.1, 0.2, 0.3]]])
-        mock_request.app.state.config.models["bi_tokenizer"].return_value = {"input_ids": []}
-        mock_request.app.state.config.models["bi_encoder"].return_value = mock_output
+        # Shape: [batch_size, sequence_length, hidden_size]
+        # Mean over axis=1 gives [batch_size, hidden_size]
+        mock_output.last_hidden_state = np.array([[[0.1, 0.2, 0.3], [0.1, 0.2, 0.3]]])
+        mock_request.app.state.models["bi_tokenizer"].return_value = {"input_ids": []}
+        mock_request.app.state.models["bi_encoder"].return_value = mock_output
 
         embedding = service._embed_text("test text")
 
         assert len(embedding) == 3
-        # Mean is computed over axis=1, so we get the mean of the sequence dimension
-        # which gives us [0.1, 0.2, 0.3] for a single token sequence
+        # Mean over sequence dimension (axis=1) gives us the pooled embedding
         assert embedding == [0.1, 0.2, 0.3]
 
 
@@ -185,7 +186,7 @@ class TestRerank:
 
     def test_rerank_with_missing_model(self, mock_request):
         """Test reranking with missing model."""
-        mock_request.app.state.config.models = {}
+        mock_request.app.state.models = {}  # Empty models dict
         service = RetrievalService(mock_request)
 
         with pytest.raises(RerankingError, match="Model configuration error"):
@@ -195,8 +196,8 @@ class TestRerank:
         """Test reranking when model fails."""
         service = RetrievalService(mock_request)
 
-        mock_request.app.state.config.models["cross_tokenizer"].return_value = {"input_ids": []}
-        mock_request.app.state.config.models["cross_encoder"].side_effect = RuntimeError("Model failed")
+        mock_request.app.state.models["cross_tokenizer"].return_value = {"input_ids": []}
+        mock_request.app.state.models["cross_encoder"].side_effect = RuntimeError("Model failed")
 
         with pytest.raises(RerankingError, match="Failed to rerank"):
             service.rerank("question", [{"text": "doc"}], 1)
@@ -207,8 +208,8 @@ class TestRerank:
 
         # Mock model output without logits
         mock_output = MagicMock(spec=[])
-        mock_request.app.state.config.models["cross_tokenizer"].return_value = {"input_ids": []}
-        mock_request.app.state.config.models["cross_encoder"].return_value = mock_output
+        mock_request.app.state.models["cross_tokenizer"].return_value = {"input_ids": []}
+        mock_request.app.state.models["cross_encoder"].return_value = mock_output
 
         with pytest.raises(RerankingError, match="missing 'logits'"):
             service.rerank("question", [{"text": "doc"}], 1)
@@ -222,8 +223,8 @@ class TestRerank:
         mock_output.logits = MagicMock()
         mock_output.logits.reshape.return_value.tolist.return_value = [0.5]  # 1 score for 2 candidates
 
-        mock_request.app.state.config.models["cross_tokenizer"].return_value = {"input_ids": []}
-        mock_request.app.state.config.models["cross_encoder"].return_value = mock_output
+        mock_request.app.state.models["cross_tokenizer"].return_value = {"input_ids": []}
+        mock_request.app.state.models["cross_encoder"].return_value = mock_output
 
         with pytest.raises(RerankingError, match="Score count mismatch"):
             service.rerank("question", [{"text": "doc1"}, {"text": "doc2"}], 2)
@@ -237,8 +238,8 @@ class TestRerank:
         mock_output.logits = MagicMock()
         mock_output.logits.reshape.return_value.tolist.return_value = [0.9, 0.3, 0.7]
 
-        mock_request.app.state.config.models["cross_tokenizer"].return_value = {"input_ids": []}
-        mock_request.app.state.config.models["cross_encoder"].return_value = mock_output
+        mock_request.app.state.models["cross_tokenizer"].return_value = {"input_ids": []}
+        mock_request.app.state.models["cross_encoder"].return_value = mock_output
 
         candidates = [
             {"text": "doc1"},

@@ -20,12 +20,22 @@ def get_application(config: Config) -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(application: FastAPI):
-        # Startup: initialize clients
+        # Startup: initialize clients and load models
         application.state.qdrant = QdrantClient(
             host=config.kb_host, port=config.kb_port
         )
         logger.info("Qdrant client initialized")
+
+        # Load models into app state
+        application.state.models = load_models(
+            config.ROOTDIR,
+            config.bi_encoder_path,
+            config.cross_encoder_path,
+        )
+        logger.info("Models loaded into app state")
+
         yield
+
         # Shutdown: clean up
         application.state.qdrant.close()
         logger.info("Clients shut down")
@@ -34,12 +44,6 @@ def get_application(config: Config) -> FastAPI:
     application = FastAPI(lifespan=lifespan)
 
     application.state.config = config
-
-    config.models = load_models(
-        config.ROOTDIR,
-        config.bi_encoder_path,
-        config.cross_encoder_path,
-    )
 
     application.middleware("http")(request_timer)
     application.middleware("http")(add_request_id)

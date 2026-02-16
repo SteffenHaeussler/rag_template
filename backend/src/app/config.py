@@ -10,9 +10,6 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Config(BaseSettings):
     _env_file: str = os.getenv("ENV_FILE", ".env")
 
-    # workaround for storing db items
-    models: Dict = {}
-
     FASTAPI_ENV: constr(to_upper=True) = Field(default="DEV")
     BASEDIR: str = str(Path(__file__).resolve().parent)
     ROOTDIR: str = str(Path(__file__).resolve().parents[2])

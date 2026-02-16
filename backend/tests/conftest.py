@@ -59,7 +59,7 @@ def test_app(mock_qdrant, mock_models):
 
     app.state.qdrant = mock_qdrant
     app.state.config = Config()
-    app.state.config.models = mock_models
+    app.state.models = mock_models  # Models now in app.state, not config
 
     return app
 

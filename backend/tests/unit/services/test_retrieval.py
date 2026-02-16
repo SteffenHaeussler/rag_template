@@ -10,7 +10,7 @@ from src.app.v1.schema import SearchResult
 @pytest.fixture
 def mock_request():
     request = MagicMock(spec=Request)
-    request.app.state.config.models = {
+    request.app.state.models = {
         "bi_tokenizer": MagicMock(),
         "bi_encoder": MagicMock(),
         "cross_tokenizer": MagicMock(),
@@ -31,7 +31,7 @@ class TestRetrievalService:
         class MockModelOutput:
             last_hidden_state = np.array([[[1.0, 1.0], [1.0, 1.0]]]) # batch 1, seq 2, dim 2
 
-        mock_request.app.state.config.models["bi_encoder"].return_value = MockModelOutput()
+        mock_request.app.state.models["bi_encoder"].return_value = MockModelOutput()
 
         embedding = service._embed_text("test")
         assert len(embedding) == 2
@@ -59,8 +59,8 @@ class TestRetrievalService:
     def test_rerank(self, mock_request):
         service = RetrievalService(mock_request)
 
-        mock_tokenizer = mock_request.app.state.config.models["cross_tokenizer"]
-        mock_model = mock_request.app.state.config.models["cross_encoder"]
+        mock_tokenizer = mock_request.app.state.models["cross_tokenizer"]
+        mock_model = mock_request.app.state.models["cross_encoder"]
 
         # Mock model output
         mock_output = MagicMock()

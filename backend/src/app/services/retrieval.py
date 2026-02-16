@@ -12,6 +12,7 @@ class RetrievalService:
     def __init__(self, request: Request):
         self.request = request
         self.config = request.app.state.config
+        self.models = request.app.state.models
         self.qdrant: QdrantClient = request.app.state.qdrant
 
     def _embed_text(self, text: str) -> List[float]:
@@ -31,8 +32,8 @@ class RetrievalService:
             raise EmbeddingError("Cannot embed empty text")
 
         try:
-            tokenizer = self.config.models["bi_tokenizer"]
-            model = self.config.models["bi_encoder"]
+            tokenizer = self.models["bi_tokenizer"]
+            model = self.models["bi_encoder"]
 
             inputs = tokenizer(
                 text, padding=True, truncation=True, return_tensors="np", max_length=512
@@ -117,8 +118,8 @@ class RetrievalService:
             ]
 
         try:
-            tokenizer = self.config.models["cross_tokenizer"]
-            model = self.config.models["cross_encoder"]
+            tokenizer = self.models["cross_tokenizer"]
+            model = self.models["cross_encoder"]
 
             candidate_texts = [c.get("text", "") for c in candidates]
             pairs = [[question, text] for text in candidate_texts]
