@@ -248,18 +248,15 @@ class TestDatapointInsertErrors:
 
     @patch('src.app.v1.router.RetrievalService')
     def test_bulk_insert_embedding_error(self, mock_service_class, client, mock_qdrant):
-        """Test that embedding errors during bulk insert return 500 with index."""
+        """Test that embedding errors during bulk insert return 500."""
         mock_qdrant.collection_exists.return_value = True
         mock_qdrant.get_collection.return_value = MagicMock(
             config=MagicMock(params=MagicMock(vectors=MagicMock(size=384)))
         )
 
         mock_service = MagicMock()
-        # Succeed on first, fail on second
-        mock_service._embed_text.side_effect = [
-            [0.1] * 384,
-            EmbeddingError("Model failed")
-        ]
+        # Mock batch embedding to fail
+        mock_service._embed_texts_batch.side_effect = EmbeddingError("Batch embedding failed")
         mock_service_class.return_value = mock_service
 
         response = client.post("/v1/collections/test/datapoints/bulk", json=[
@@ -269,7 +266,7 @@ class TestDatapointInsertErrors:
 
         assert response.status_code == status.HTTP_500_INTERNAL_SERVER_ERROR
         detail = response.json()["detail"]
-        assert "index 1" in detail  # Should indicate which datapoint failed
+        assert "Batch embedding failed" in detail
 
     @patch('src.app.v1.router.RetrievalService')
     def test_update_datapoint_embedding_error(self, mock_service_class, client, mock_qdrant):

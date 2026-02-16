@@ -27,8 +27,24 @@ def test_insert_datapoint_success(client, mock_qdrant):
     assert points[0].payload["source"] == "test"
 
 
-def test_insert_bulk_datapoints(client, mock_qdrant):
+def test_insert_bulk_datapoints(client, mock_qdrant, mock_models):
+    """Test bulk insert with batch embedding."""
     mock_qdrant.collection_exists.return_value = True
+
+    # Mock get_collection for dimension validation
+    mock_collection_info = MagicMock()
+    mock_collection_info.config.params.vectors.size = 384
+    mock_qdrant.get_collection.return_value = mock_collection_info
+
+    # Mock batch embedding to return 2 embeddings
+    import numpy as np
+    mock_output = MagicMock()
+    mock_output.last_hidden_state = np.array([
+        [[0.1] * 384, [0.1] * 384],  # text1
+        [[0.2] * 384, [0.2] * 384],  # text2
+    ])
+    mock_models["bi_tokenizer"].return_value = {"input_ids": []}
+    mock_models["bi_encoder"].return_value = mock_output
 
     payload = [
         {"text": "text1", "metadata": {"id": 1}},

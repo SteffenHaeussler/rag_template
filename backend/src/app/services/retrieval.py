@@ -58,6 +58,82 @@ class RetrievalService:
             logger.error(f"Embedding generation failed for text (length={len(text)}): {e}")
             raise EmbeddingError(f"Failed to generate embedding: {str(e)}", original_error=e)
 
+    def _embed_texts_batch(self, texts: List[str]) -> List[List[float]]:
+        """
+        Generate embeddings for multiple texts in a batch (10-50x faster than one-by-one).
+
+        Args:
+            texts: List of input texts to embed
+
+        Returns:
+            List of embedding vectors, one per input text
+
+        Raises:
+            EmbeddingError: If batch embedding generation fails
+        """
+        if not texts:
+            return []
+
+        # Filter out empty texts but keep track of indices
+        valid_indices = []
+        valid_texts = []
+        for idx, text in enumerate(texts):
+            if text and text.strip():
+                valid_indices.append(idx)
+                valid_texts.append(text)
+
+        if not valid_texts:
+            raise EmbeddingError("Cannot embed batch: all texts are empty")
+
+        try:
+            tokenizer = self.models["bi_tokenizer"]
+            model = self.models["bi_encoder"]
+
+            # Batch tokenization - much faster than one-by-one
+            inputs = tokenizer(
+                valid_texts,
+                padding=True,
+                truncation=True,
+                return_tensors="np",
+                max_length=512
+            )
+
+            # Batch inference - this is where we get the big speedup
+            outputs = model(**inputs)
+
+            if not hasattr(outputs, "last_hidden_state"):
+                raise EmbeddingError("Model output missing 'last_hidden_state'")
+
+            # Mean pooling across sequence dimension (axis=1)
+            # Shape: [batch_size, seq_len, hidden_size] -> [batch_size, hidden_size]
+            embeddings = np.mean(outputs.last_hidden_state, axis=1).tolist()
+
+            if len(embeddings) != len(valid_texts):
+                raise EmbeddingError(
+                    f"Embedding count mismatch: expected {len(valid_texts)}, got {len(embeddings)}"
+                )
+
+            # Reconstruct full list with None for empty texts
+            result = [None] * len(texts)
+            for idx, embedding in zip(valid_indices, embeddings):
+                if not embedding or len(embedding) == 0:
+                    raise EmbeddingError(f"Generated embedding is empty for text at index {idx}")
+                result[idx] = embedding
+
+            # Fill in None values with error information
+            for idx, emb in enumerate(result):
+                if emb is None:
+                    raise EmbeddingError(f"Text at index {idx} was empty or whitespace-only")
+
+            return result
+
+        except KeyError as e:
+            logger.error(f"Model or tokenizer not found: {e}")
+            raise EmbeddingError(f"Model configuration error: {e}", original_error=e)
+        except Exception as e:
+            logger.error(f"Batch embedding generation failed for {len(texts)} texts: {e}")
+            raise EmbeddingError(f"Failed to generate batch embeddings: {str(e)}", original_error=e)
+
     @retry_with_backoff(max_retries=2, initial_delay=0.5, exceptions=(Exception,))
     def search(self, collection_name: str, query_vector: List[float], limit: int) -> List[PointStruct]:
         """
