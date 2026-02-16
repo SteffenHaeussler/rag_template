@@ -13,7 +13,6 @@ services:
       kb_host: "qdrant"
       prompt_path: "prompts/generation.yaml"
       GEMINI_API_KEY: ${GEMINI_API_KEY}
-      LLM_API_KEY: ${GEMINI_API_KEY}
     volumes:
       - ./models:/app/models
     healthcheck:

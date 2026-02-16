@@ -7,7 +7,7 @@
 FROM python:3.12-slim as base
 
 ARG DEFAULT_FASTAPI_ENV=dev
-ENV FASTAPI_DEV=${DEFAULT_FASTAPI_ENV}
+ENV FASTAPI_ENV=${DEFAULT_FASTAPI_ENV}
 
 RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates
 
