@@ -73,28 +73,56 @@ class DocumentIngester:
             List of document dictionaries with filename, filepath, and content
 
         Raises:
-            ValueError: If data directory doesn't exist
+            ValueError: If data directory doesn't exist or is invalid
         """
         documents = []
-        data_path = Path(data_dir)
+        data_path = Path(data_dir).resolve()
 
+        # Validate directory exists and is actually a directory
         if not data_path.exists():
             raise ValueError(f"Data directory not found: {data_dir}")
+
+        if not data_path.is_dir():
+            raise ValueError(f"Path is not a directory: {data_dir}")
+
+        # Check for directory traversal attempts
+        try:
+            # Ensure the resolved path is still within reasonable bounds
+            data_path.relative_to(Path.cwd().resolve())
+        except ValueError:
+            # If not relative to cwd, at least ensure it's an absolute safe path
+            if ".." in str(data_path):
+                raise ValueError(f"Invalid directory path (potential directory traversal): {data_dir}")
 
         md_files = list(data_path.glob("*.md"))
         if not md_files:
             return []
 
         for md_file in md_files:
-            with open(md_file, "r", encoding="utf-8") as f:
-                content = f.read()
-                documents.append(
-                    {
-                        "filename": md_file.name,
-                        "filepath": str(md_file.absolute()),
-                        "content": content,
-                    }
-                )
+            # Additional safety check for each file
+            if not md_file.is_file():
+                continue
+
+            # Ensure file is within the data directory (prevent symlink attacks)
+            try:
+                md_file.resolve().relative_to(data_path)
+            except ValueError:
+                print(f"⚠ Skipping file outside data directory: {md_file}")
+                continue
+
+            try:
+                with open(md_file, "r", encoding="utf-8") as f:
+                    content = f.read()
+                    documents.append(
+                        {
+                            "filename": md_file.name,
+                            "filepath": str(md_file.absolute()),
+                            "content": content,
+                        }
+                    )
+            except (IOError, OSError) as e:
+                print(f"⚠ Error reading file {md_file}: {e}")
+                continue
 
         return documents
 
@@ -108,9 +136,17 @@ class DocumentIngester:
 
         Returns:
             List of text chunks
+
+        Raises:
+            ValueError: If text exceeds maximum allowed size
         """
+        MAX_TEXT_SIZE = 10_000_000  # 10MB character limit
+
         if not text or not text.strip():
             return []
+
+        if len(text) > MAX_TEXT_SIZE:
+            raise ValueError(f"Text size ({len(text)} chars) exceeds maximum allowed size ({MAX_TEXT_SIZE} chars)")
 
         # Split by double newline (paragraphs) first
         paragraphs = text.split("\n\n")

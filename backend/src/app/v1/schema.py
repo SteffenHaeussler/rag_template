@@ -1,6 +1,7 @@
 from typing import Any, Dict, List, Optional, Union
+import re
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 #######################################################
@@ -9,16 +10,38 @@ from pydantic import BaseModel, Field
 
 
 class CollectionCreate(BaseModel):
-    name: str
-    dimension: int = Field(..., description="Vector dimension (e.g., 384 for all-MiniLM-L6-v2)")
-    distance_metric: str = "cosine"
+    name: str = Field(..., min_length=1, max_length=255, pattern=r'^[a-zA-Z0-9_-]+$')
+    dimension: int = Field(..., gt=0, le=4096, description="Vector dimension (e.g., 384 for all-MiniLM-L6-v2)")
+    distance_metric: str = Field(default="cosine", pattern=r'^(cosine|euclid|dot)$')
+
+    @field_validator('name')
+    @classmethod
+    def validate_name(cls, v: str) -> str:
+        if not re.match(r'^[a-zA-Z0-9_-]+$', v):
+            raise ValueError('Collection name must contain only alphanumeric characters, hyphens, and underscores')
+        return v
 
 
 class DatapointCreate(BaseModel):
     id: Optional[Union[str, int]] = None
-    text: str
-    metadata: Dict[str, Any] = {}
-    embedding: Optional[List[float]] = None
+    text: str = Field(..., min_length=1, max_length=100000)
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+    embedding: Optional[List[float]] = Field(default=None, min_length=1, max_length=4096)
+
+    @field_validator('text')
+    @classmethod
+    def validate_text(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError('Text cannot be empty or only whitespace')
+        return v
+
+    @field_validator('embedding')
+    @classmethod
+    def validate_embedding(cls, v: Optional[List[float]]) -> Optional[List[float]]:
+        if v is not None:
+            if not all(isinstance(x, (int, float)) for x in v):
+                raise ValueError('Embedding must contain only numeric values')
+        return v
 
 
 class DatapointUpdate(BaseModel):
@@ -36,7 +59,7 @@ class QdrantPoint(BaseModel):
 class SearchResult(BaseModel):
     text: str
     score: float
-    metadata: Dict[str, Any] = {}
+    metadata: Dict[str, Any] = Field(default_factory=dict)
 
 
 #######################################################
@@ -45,24 +68,62 @@ class SearchResult(BaseModel):
 
 
 class EmbeddingRequest(BaseModel):
-    text: str
+    text: str = Field(..., min_length=1, max_length=10000)
+
+    @field_validator('text')
+    @classmethod
+    def validate_text(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError('Text cannot be empty or only whitespace')
+        return v
 
 
 class QueryRequest(BaseModel):
-    question: str
-    collection_name: Optional[str] = None
-    n_retrieval: Optional[int] = None
-    n_ranking: Optional[int] = None
+    question: str = Field(..., min_length=1, max_length=10000)
+    collection_name: Optional[str] = Field(default=None, min_length=1, max_length=255, pattern=r'^[a-zA-Z0-9_-]+$')
+    n_retrieval: Optional[int] = Field(default=None, gt=0, le=1000)
+    n_ranking: Optional[int] = Field(default=None, gt=0, le=1000)
+
+    @field_validator('question')
+    @classmethod
+    def validate_question(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError('Question cannot be empty or only whitespace')
+        return v
 
 
 class RankingRequest(BaseModel):
-    question: str
-    texts: List[str]
+    question: str = Field(..., min_length=1, max_length=10000)
+    texts: List[str] = Field(..., min_length=1, max_length=1000)
+
+    @field_validator('question')
+    @classmethod
+    def validate_question(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError('Question cannot be empty or only whitespace')
+        return v
+
+    @field_validator('texts')
+    @classmethod
+    def validate_texts(cls, v: List[str]) -> List[str]:
+        if not v:
+            raise ValueError('Texts list cannot be empty')
+        for idx, text in enumerate(v):
+            if not text.strip():
+                raise ValueError(f'Text at index {idx} cannot be empty or only whitespace')
+        return v
 
 
 class SearchRequest(BaseModel):
-    embedding: List[float]
-    n_retrieval: Optional[int] = None
+    embedding: List[float] = Field(..., min_length=1, max_length=4096)
+    n_retrieval: Optional[int] = Field(default=None, gt=0, le=1000)
+
+    @field_validator('embedding')
+    @classmethod
+    def validate_embedding(cls, v: List[float]) -> List[float]:
+        if not all(isinstance(x, (int, float)) for x in v):
+            raise ValueError('Embedding must contain only numeric values')
+        return v
 
 
 #######################################################
@@ -89,7 +150,7 @@ class DatapointEmbeddingResponse(BaseModel):
 class DatapointResponse(BaseModel):
     id: str
     text: str
-    metadata: Dict[str, Any] = {}
+    metadata: Dict[str, Any] = Field(default_factory=dict)
 
 
 class EmbeddingResponse(BaseModel):
@@ -108,21 +169,50 @@ class QueryResponse(BaseModel):
 
 
 class ChatRequest(BaseModel):
-    question: str
-    context: List[str]
-    prompt_key: Optional[str] = None
-    prompt_language: Optional[str] = None
-    temperature: Optional[float] = None
+    question: str = Field(..., min_length=1, max_length=10000)
+    context: List[str] = Field(..., max_length=100)
+    prompt_key: Optional[str] = Field(default=None, min_length=1, max_length=100)
+    prompt_language: Optional[str] = Field(default=None, min_length=2, max_length=10)
+    temperature: Optional[float] = Field(default=None, ge=0.0, le=2.0)
+
+    @field_validator('question')
+    @classmethod
+    def validate_question(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError('Question cannot be empty or only whitespace')
+        return v
+
+    @field_validator('context')
+    @classmethod
+    def validate_context(cls, v: List[str]) -> List[str]:
+        for idx, text in enumerate(v):
+            if not isinstance(text, str):
+                raise ValueError(f'Context item at index {idx} must be a string')
+        return v
 
 
 class RagRequest(BaseModel):
-    question: str
-    collection_name: str
-    n_retrieval: Optional[int] = None
-    n_ranking: Optional[int] = None
-    prompt_key: Optional[str] = None
-    prompt_language: Optional[str] = None
-    temperature: Optional[float] = None
+    question: str = Field(..., min_length=1, max_length=10000)
+    collection_name: str = Field(..., min_length=1, max_length=255, pattern=r'^[a-zA-Z0-9_-]+$')
+    n_retrieval: Optional[int] = Field(default=None, gt=0, le=1000)
+    n_ranking: Optional[int] = Field(default=None, gt=0, le=1000)
+    prompt_key: Optional[str] = Field(default=None, min_length=1, max_length=100)
+    prompt_language: Optional[str] = Field(default=None, min_length=2, max_length=10)
+    temperature: Optional[float] = Field(default=None, ge=0.0, le=2.0)
+
+    @field_validator('question')
+    @classmethod
+    def validate_question(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError('Question cannot be empty or only whitespace')
+        return v
+
+    @field_validator('collection_name')
+    @classmethod
+    def validate_collection_name(cls, v: str) -> str:
+        if not re.match(r'^[a-zA-Z0-9_-]+$', v):
+            raise ValueError('Collection name must contain only alphanumeric characters, hyphens, and underscores')
+        return v
 
 
 class ChatResponse(BaseModel):

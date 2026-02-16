@@ -7,7 +7,14 @@ from src.app.config import Config
 
 @pytest.fixture
 def mock_qdrant():
-    return MagicMock()
+    mock = MagicMock()
+
+    # Mock get_collection for dimension validation
+    mock_collection_info = MagicMock()
+    mock_collection_info.config.params.vectors.size = 384  # Default dimension
+    mock.get_collection.return_value = mock_collection_info
+
+    return mock
 
 
 @pytest.fixture

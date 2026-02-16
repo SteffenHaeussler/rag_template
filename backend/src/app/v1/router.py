@@ -44,15 +44,58 @@ def verify_collection(collection_name: str, qdrant: QdrantClient = Depends(get_q
 # ==========================================
 
 
+def validate_embedding_dimension(embedding: List[float], collection_name: str, qdrant: QdrantClient) -> None:
+    """Validate that embedding dimension matches collection configuration."""
+    collection_info = qdrant.get_collection(collection_name)
+    expected_dim = collection_info.config.params.vectors.size
+    actual_dim = len(embedding)
+
+    if actual_dim != expected_dim:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Embedding dimension mismatch: collection '{collection_name}' expects {expected_dim}D vectors, got {actual_dim}D"
+        )
+
+
 def parse_datapoint_id(datapoint_id: str) -> Union[str, int]:
-    """Convert datapoint ID to int if numeric, validate UUID otherwise."""
+    """Convert datapoint ID to int if numeric, validate UUID otherwise.
+
+    Args:
+        datapoint_id: The ID as a string
+
+    Returns:
+        Parsed ID as int or validated UUID string
+
+    Raises:
+        HTTPException: If ID format is invalid
+    """
+    if not datapoint_id or not datapoint_id.strip():
+        raise HTTPException(
+            status_code=400,
+            detail="Datapoint ID cannot be empty"
+        )
+
+    datapoint_id = datapoint_id.strip()
+
+    # Try parsing as positive integer
     if datapoint_id.isdigit():
-        return int(datapoint_id)
+        parsed_int = int(datapoint_id)
+        if parsed_int < 0:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid datapoint ID: {datapoint_id}. Integer IDs must be non-negative."
+            )
+        return parsed_int
+
+    # Try parsing as UUID
     try:
         uuid.UUID(datapoint_id)
+        return datapoint_id
     except ValueError:
-        raise HTTPException(status_code=400, detail=f"Invalid datapoint ID: {datapoint_id}. Must be an integer or UUID.")
-    return datapoint_id
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid datapoint ID format: '{datapoint_id}'. Must be a positive integer or valid UUID."
+        )
 
 
 # ==========================================
@@ -104,6 +147,9 @@ def insert_datapoint(request: Request, datapoint: schema.DatapointCreate, collec
     retrieval_service = RetrievalService(request)
     embedding = datapoint.embedding or retrieval_service._embed_text(datapoint.text)
 
+    # Validate embedding dimension
+    validate_embedding_dimension(embedding, collection_name, qdrant)
+
     qdrant.upsert(
         collection_name=collection_name,
         points=[
@@ -129,6 +175,10 @@ def insert_bulk_datapoints(request: Request, datapoints: List[schema.DatapointCr
     for dp in datapoints:
         point_id = dp.id or str(uuid.uuid4())
         embedding = dp.embedding or retrieval_service._embed_text(dp.text)
+
+        # Validate embedding dimension (do this before adding to points list)
+        validate_embedding_dimension(embedding, collection_name, qdrant)
+
         points.append(
             PointStruct(
                 id=point_id,
@@ -269,6 +319,9 @@ def ranking(request: Request, body: schema.RankingRequest) -> schema.RankingResp
 def search(request: Request, collection_name: str, body: schema.SearchRequest, qdrant: QdrantClient = Depends(get_qdrant)) -> schema.SearchResponse:
     config = request.app.state.config
     n_items = body.n_retrieval or config.kb_limit
+
+    # Validate embedding dimension
+    validate_embedding_dimension(body.embedding, collection_name, qdrant)
 
     retrieval_service = RetrievalService(request)
 
