@@ -29,7 +29,7 @@ class TestGenerationService:
     @patch("src.app.services.generation.yaml.safe_load")
     def test_generate_answer(self, mock_yaml_load, mock_open, mock_completion, mock_request):
         mock_yaml_load.return_value = {
-            "qa_prompt": {
+            "prompt": {
                 "en": "{% for c in context %}{{ c }} {% endfor %}{{ question }}",
                 "de": "{% for c in context %}{{ c }} {% endfor %}{{ question }} DE"
             }
@@ -37,7 +37,7 @@ class TestGenerationService:
 
         # Configure mock request
         mock_request.app.state.config.prompt_path = "app/prompts/generation.yaml"
-        mock_request.app.state.config.prompt_key = "qa_prompt"
+        mock_request.app.state.config.prompt_key = "prompt"
         mock_request.app.state.config.prompt_language = "en"
         mock_request.app.state.config.temperature = 0.0
 
@@ -64,7 +64,7 @@ class TestGenerationService:
     @patch("src.app.services.generation.yaml.safe_load")
     def test_generate_answer_dynamic(self, mock_yaml_load, mock_open, mock_completion, mock_request):
         mock_yaml_load.return_value = {
-            "qa_prompt": {
+            "prompt": {
                 "en": "{% for c in context %}{{ c }} {% endfor %}{{ question }}",
                 "de": "{% for c in context %}{{ c }} {% endfor %}{{ question }} DE"
             }
@@ -72,7 +72,7 @@ class TestGenerationService:
 
         # Configure mock request defaults
         mock_request.app.state.config.prompt_path = "app/prompts/generation.yaml"
-        mock_request.app.state.config.prompt_key = "qa_prompt"
+        mock_request.app.state.config.prompt_key = "prompt"
         mock_request.app.state.config.prompt_language = "en"
         mock_request.app.state.config.temperature = 0.0
 

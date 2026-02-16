@@ -1,9 +1,3 @@
-"""
-Document ingestion module for RAG pipeline.
-
-Handles loading, chunking, and ingesting documents via the API.
-"""
-
 import sys
 from pathlib import Path
 from typing import List, Dict
