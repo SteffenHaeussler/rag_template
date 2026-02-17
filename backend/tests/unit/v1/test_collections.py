@@ -50,7 +50,7 @@ def test_create_collection_invalid_metric(client, mock_qdrant):
     response = client.post("/v1/collections/", json=payload)
 
     # Pydantic validation returns 422 for invalid values
-    assert response.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
+    assert response.status_code == status.HTTP_422_UNPROCESSABLE_CONTENT
     assert "detail" in response.json()
 
 

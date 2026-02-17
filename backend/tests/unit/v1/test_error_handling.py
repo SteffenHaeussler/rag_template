@@ -87,7 +87,7 @@ class TestQueryEndpointErrors:
         })
 
         assert response.status_code == status.HTTP_500_INTERNAL_SERVER_ERROR
-        assert "Query failed" in response.json()["detail"]
+        assert "Failed to generate embedding" in response.json()["detail"]
 
     @patch('src.app.v1.router.RetrievalService')
     def test_query_vectordb_error(self, mock_service_class, client, mock_qdrant):
@@ -102,7 +102,7 @@ class TestQueryEndpointErrors:
         })
 
         assert response.status_code == status.HTTP_500_INTERNAL_SERVER_ERROR
-        assert "Query failed" in response.json()["detail"]
+        assert "Search operation failed" in response.json()["detail"]
 
     @patch('src.app.v1.router.RetrievalService')
     def test_query_reranking_error(self, mock_service_class, client, mock_qdrant):
@@ -117,7 +117,7 @@ class TestQueryEndpointErrors:
         })
 
         assert response.status_code == status.HTTP_500_INTERNAL_SERVER_ERROR
-        assert "Query failed" in response.json()["detail"]
+        assert "Failed to rerank results" in response.json()["detail"]
 
 
 class TestChatEndpointErrors:
@@ -171,7 +171,7 @@ class TestRAGEndpointErrors:
         })
 
         assert response.status_code == status.HTTP_500_INTERNAL_SERVER_ERROR
-        assert "Failed to retrieve context" in response.json()["detail"]
+        assert "Failed to generate embedding" in response.json()["detail"]
 
     @patch('src.app.v1.router.RetrievalService')
     @patch('src.app.v1.router.GenerationService')
@@ -221,7 +221,7 @@ class TestRAGEndpointErrors:
         })
 
         assert response.status_code == status.HTTP_500_INTERNAL_SERVER_ERROR
-        assert "Failed to generate answer" in response.json()["detail"]
+        assert "Configuration error" in response.json()["detail"]
 
 
 class TestDatapointInsertErrors:

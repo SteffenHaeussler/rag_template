@@ -14,6 +14,22 @@ from src.app.logging import setup_logger
 from src.app.middleware import RequestTimer, add_request_id
 from src.app.utils import load_models
 from src.app.v1 import router as v1_router
+from src.app.exceptions import (
+    EmbeddingError,
+    RerankingError,
+    GenerationError,
+    VectorDBError,
+    ConfigurationError,
+    ValidationError,
+)
+from src.app.handlers import (
+    embedding_error_handler,
+    reranking_error_handler,
+    generation_error_handler,
+    vectordb_error_handler,
+    configuration_error_handler,
+    validation_error_handler,
+)
 
 
 def get_application(config: Config) -> FastAPI:
@@ -45,6 +61,14 @@ def get_application(config: Config) -> FastAPI:
     application = FastAPI(lifespan=lifespan)
 
     application.state.config = config
+
+    # Register global exception handlers
+    application.add_exception_handler(EmbeddingError, embedding_error_handler)
+    application.add_exception_handler(RerankingError, reranking_error_handler)
+    application.add_exception_handler(GenerationError, generation_error_handler)
+    application.add_exception_handler(VectorDBError, vectordb_error_handler)
+    application.add_exception_handler(ConfigurationError, configuration_error_handler)
+    application.add_exception_handler(ValidationError, validation_error_handler)
 
     application.middleware("http")(request_timer)
     application.middleware("http")(add_request_id)
