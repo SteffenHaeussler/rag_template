@@ -1,4 +1,4 @@
-from typing import List, Optional, Dict, Any
+from typing import List, Optional
 from fastapi import Request
 from litellm import completion
 from loguru import logger
@@ -6,25 +6,13 @@ from src.app.v1.schema import ChatResponse
 from src.app.exceptions import GenerationError, ConfigurationError
 from src.app.retry import retry_with_backoff, is_transient_error
 
-import yaml
 import jinja2
-from pathlib import Path
 
 class GenerationService:
     def __init__(self, request: Request):
         self.config = request.app.state.config
         self.model = self.config.generation_model
         self.prompts = request.app.state.prompts
-
-    def _load_yaml(self, path: Path) -> Dict[str, Any]:
-        """Load YAML file with error handling."""
-        try:
-            with open(path, "r") as f:
-                return yaml.safe_load(f)
-        except FileNotFoundError:
-            raise ConfigurationError(f"Prompt file not found: {path}")
-        except yaml.YAMLError as e:
-            raise ConfigurationError(f"Invalid YAML in prompt file: {path}", original_error=e)
 
     @retry_with_backoff(max_retries=2, initial_delay=1.0, exceptions=(Exception,), retryable=is_transient_error)
     def _call_llm(self, prompt: str, temperature: float) -> str:
@@ -58,19 +46,11 @@ class GenerationService:
 
             return content
 
-        except Exception as e:
-            error_msg = str(e)
-            logger.error(f"LLM generation failed: {error_msg}")
-
-            # Check if error is transient (for retry logic)
-            if not is_transient_error(e):
-                # Non-transient errors shouldn't be retried
-                raise GenerationError(
-                    f"LLM generation failed: {error_msg}",
-                    original_error=e
-                )
-            # Transient errors will be retried by decorator
+        except GenerationError:
             raise
+        except Exception as e:
+            logger.error(f"LLM generation failed: {e}")
+            raise GenerationError(f"LLM generation failed: {e}", original_error=e)
 
     def generate_answer(self, question: str, context: List[str], prompt_key: Optional[str] = None, prompt_language: Optional[str] = None, temperature: Optional[float] = None) -> str:
         """

@@ -1,9 +1,7 @@
 """Tests for GenerationService error handling."""
 
 import pytest
-from unittest.mock import MagicMock, patch, mock_open
-from pathlib import Path
-import yaml
+from unittest.mock import MagicMock, patch
 
 from src.app.services.generation import GenerationService
 from src.app.exceptions import GenerationError, ConfigurationError
