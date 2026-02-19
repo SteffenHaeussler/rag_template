@@ -102,13 +102,13 @@ class TestCallLLM:
 
     @patch('src.app.services.generation.completion')
     def test_llm_call_with_api_error(self, mock_completion, mock_request):
-        """Test LLM call with API error."""
+        """Test that non-transient API errors propagate as-is from _call_llm.
+        Wrapping into GenerationError happens in generate_answer."""
         service = GenerationService(mock_request)
 
-        # Mock API error
         mock_completion.side_effect = Exception("API error: Invalid API key")
 
-        with pytest.raises(GenerationError, match="LLM generation failed"):
+        with pytest.raises(Exception, match="API error"):
             service._call_llm("Test prompt", 0.5)
 
     @patch('src.app.services.generation.completion')

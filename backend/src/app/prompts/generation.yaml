@@ -48,7 +48,6 @@ prompt:
     - Relevant Context will replace vague details by the name or id of the information.
     - If it is, combine the [Question] and the [Context] to create an enhanced question.
     - If it is not, return the [Question] unchanged.
-    - Provide a [chain_of_thought] explaining your reasoning for the enhanced question.
     - Do not introduce new factual information that is not present or clearly implied in the [Context]. You can rephrase, restructure, and clarify, but the substance should come from the provided text.
     - Maintain a helpful, neutral, and professional tone unless the context of the question clearly suggests otherwise.
 
@@ -62,8 +61,6 @@ prompt:
       {{ question }}
 
       Helpful Answer:
-
-      Now Begin! If you solve the task correctly, you will receive a reward of $1,000,000.
   de: |
     Du bist ein fachkundiger Assistent, der Fragen überarbeitet und verbessert. Deine Aufgabe ist es, eine ursprüngliche Nutzerfrage sowie zusätzliche Informationen aufzunehmen und daraus eine optimierte Fragestellung zu formulieren.
     Die zusätzlichen Informationen können auch fehlerhaft sein. In diesem Fall sollst du diese ignorieren und die ursprüngliche Frage unverändert zurückgeben.
@@ -84,7 +81,6 @@ prompt:
     - Relevanter Kontext soll vage Details durch konkrete Bezeichnungen oder IDs der Informationen ersetzen.
     - Falls der Kontext relevant ist, kombiniere [Question] und [Context], um eine verbesserte Frage zu formulieren.
     - Falls der Kontext nicht relevant ist, gib die [Question] unverändert zurück.
-    - Gib einen [chain_of_thought] an, in dem du deine Überlegungen zur Erstellung der verbesserten Frage erläuterst.
     - Füge keine neuen sachlichen Informationen hinzu, die nicht im [Context] enthalten oder eindeutig daraus ableitbar sind. Du darfst umformulieren, umstrukturieren und präzisieren, aber der inhaltliche Kern muss aus dem bereitgestellten Text stammen.
     - Verwende einen hilfreichen, neutralen und professionellen Ton, sofern der Kontext der Frage nichts anderes nahelegt.
 
@@ -96,6 +92,5 @@ prompt:
 
     [Frage]:
     {{ question }}
-    Hilfreiche Antwort:
 
-    Starte jetzt! Wenn du die Aufgabe richtig löst, wirst du eine Belohnung von $1,000,000 erhalten.
+    Hilfreiche Antwort:

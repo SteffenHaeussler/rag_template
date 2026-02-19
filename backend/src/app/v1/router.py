@@ -88,15 +88,9 @@ def parse_datapoint_id(datapoint_id: str) -> Union[str, int]:
 
     datapoint_id = datapoint_id.strip()
 
-    # Try parsing as positive integer
+    # Try parsing as non-negative integer (.isdigit() guarantees >= 0)
     if datapoint_id.isdigit():
-        parsed_int = int(datapoint_id)
-        if parsed_int < 0:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Invalid datapoint ID: {datapoint_id}. Integer IDs must be non-negative."
-            )
-        return parsed_int
+        return int(datapoint_id)
 
     # Try parsing as UUID
     try:
@@ -114,7 +108,7 @@ def parse_datapoint_id(datapoint_id: str) -> Union[str, int]:
 # ==========================================
 
 
-@v1.api_route("/health", methods=["GET", "POST"], response_model=schema.HealthCheckResponse)
+@v1.get("/health", response_model=schema.HealthCheckResponse)
 def health(request: Request) -> schema.HealthCheckResponse:
     return {"version": request.app.state.config.VERSION, "timestamp": time()}
 
@@ -270,8 +264,9 @@ def get_datapoint(request: Request, collection_name: str, datapoint_id: Union[st
 
     point = results[0]
     payload = point.payload or {}
-    text = payload.pop("text", "")
-    return schema.DatapointResponse(id=str(point.id), text=text, metadata=payload)
+    text = payload.get("text", "")
+    metadata = {k: v for k, v in payload.items() if k != "text"}
+    return schema.DatapointResponse(id=str(point.id), text=text, metadata=metadata)
 
 
 @v1.get("/collections/{collection_name}/datapoints/{datapoint_id}/embedding", response_model=schema.DatapointEmbeddingResponse)
@@ -321,6 +316,7 @@ def update_datapoint(request: Request, collection_name: str, datapoint_id: str, 
     if update_data.text is not None:
         payload["text"] = update_data.text
         vector = retrieval_service._embed_text(update_data.text)
+        validate_embedding_dimension(vector, collection_name, qdrant)
 
     # Merge metadata
     if update_data.metadata is not None:
@@ -390,8 +386,8 @@ def search(request: Request, collection_name: str, body: schema.SearchRequest, q
     response_data = []
     for point in points:
         payload = point.payload or {}
-        text = payload.pop("text", "")
-        metadata = {"id": point.id, **payload}
+        text = payload.get("text", "")
+        metadata = {"id": point.id, **{k: v for k, v in payload.items() if k != "text"}}
         response_data.append(
             schema.SearchResult(text=text, score=point.score, metadata=metadata)
         )

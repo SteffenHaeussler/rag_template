@@ -14,13 +14,6 @@ class CollectionCreate(BaseModel):
     dimension: int = Field(..., gt=0, le=4096, description="Vector dimension (e.g., 384 for all-MiniLM-L6-v2)")
     distance_metric: str = Field(default="cosine", pattern=r'^(cosine|euclid|dot)$')
 
-    @field_validator('name')
-    @classmethod
-    def validate_name(cls, v: str) -> str:
-        if not re.match(r'^[a-zA-Z0-9_-]+$', v):
-            raise ValueError('Collection name must contain only alphanumeric characters, hyphens, and underscores')
-        return v
-
 
 class DatapointCreate(BaseModel):
     id: Optional[Union[str, int]] = None
@@ -47,6 +40,12 @@ class DatapointCreate(BaseModel):
 class DatapointUpdate(BaseModel):
     text: Optional[str] = None
     metadata: Optional[Dict[str, Any]] = None
+
+    @model_validator(mode='after')
+    def validate_at_least_one_field(self) -> 'DatapointUpdate':
+        if self.text is None and self.metadata is None:
+            raise ValueError('At least one field (text or metadata) must be provided')
+        return self
 
 
 class QdrantPoint(BaseModel):

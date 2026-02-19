@@ -19,6 +19,9 @@ class GenerationService:
         """
         Call LLM API with retry logic for transient failures.
 
+        Raw exceptions propagate so the decorator's retryable check sees the
+        original exception type and message, not a wrapped GenerationError.
+
         Args:
             prompt: The formatted prompt
             temperature: Sampling temperature
@@ -27,30 +30,24 @@ class GenerationService:
             Generated text response
 
         Raises:
-            GenerationError: If LLM call fails after retries
+            GenerationError: If the API returns an empty response or content
+            Exception: Raw API exceptions propagate for the retry decorator
         """
-        try:
-            response = completion(
-                model=self.model,
-                messages=[{"role": "user", "content": prompt}],
-                temperature=temperature,
-                timeout=30.0,  # 30 second timeout
-            )
+        response = completion(
+            model=self.model,
+            messages=[{"role": "user", "content": prompt}],
+            temperature=temperature,
+            timeout=30.0,  # 30 second timeout
+        )
 
-            if not response or not response.choices:
-                raise GenerationError("LLM returned empty response")
+        if not response or not response.choices:
+            raise GenerationError("LLM returned empty response")
 
-            content = response.choices[0].message.content
-            if not content:
-                raise GenerationError("LLM returned empty content")
+        content = response.choices[0].message.content
+        if not content:
+            raise GenerationError("LLM returned empty content")
 
-            return content
-
-        except GenerationError:
-            raise
-        except Exception as e:
-            logger.error(f"LLM generation failed: {e}")
-            raise GenerationError(f"LLM generation failed: {e}", original_error=e)
+        return content
 
     def generate_answer(self, question: str, context: List[str], prompt_key: Optional[str] = None, prompt_language: Optional[str] = None, temperature: Optional[float] = None) -> str:
         """
@@ -88,7 +85,13 @@ class GenerationService:
             logger.error(f"Prompt rendering failed: {e}")
             raise GenerationError(f"Failed to render prompt template", original_error=e)
 
-        return self._call_llm(prompt, temp)
+        try:
+            return self._call_llm(prompt, temp)
+        except GenerationError:
+            raise
+        except Exception as e:
+            logger.error(f"LLM generation failed: {e}")
+            raise GenerationError(f"LLM generation failed: {e}", original_error=e)
 
     def _render_prompt(self, template_str: str, **kwargs) -> str:
         template = jinja2.Template(template_str)

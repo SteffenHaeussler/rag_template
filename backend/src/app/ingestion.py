@@ -178,7 +178,7 @@ class DocumentIngester:
         if current_chunk.strip():
             chunks.append(current_chunk.strip())
 
-        return chunks if chunks else [text]
+        return chunks
 
     def create_collection(self) -> bool:
         """
@@ -285,9 +285,9 @@ class DocumentIngester:
                 total_inserted += result.get("inserted_count", len(batch))
 
             except httpx.HTTPStatusError as e:
-                print(f"\nError inserting batch {i // self.batch_size + 1}: {e}")
-                print(f"Response: {e.response.text}")
-                continue
+                raise RuntimeError(
+                    f"Batch {i // self.batch_size + 1} failed: {e.response.status_code} {e.response.text}"
+                ) from e
 
         return total_inserted
 

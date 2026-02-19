@@ -6,7 +6,7 @@ from fastapi import Request, HTTPException
 from loguru import logger
 import src.app.v1.schema as schema
 from src.app.exceptions import EmbeddingError, RerankingError, VectorDBError
-from src.app.retry import retry_with_backoff
+from src.app.retry import retry_with_backoff, is_transient_error
 
 class RetrievalService:
     def __init__(self, request: Request):
@@ -113,14 +113,14 @@ class RetrievalService:
                     f"Embedding count mismatch: expected {len(valid_texts)}, got {len(embeddings)}"
                 )
 
-            # Reconstruct full list with None for empty texts
+            # Reconstruct full list preserving original indices
             result = [None] * len(texts)
             for idx, embedding in zip(valid_indices, embeddings):
                 if not embedding or len(embedding) == 0:
                     raise EmbeddingError(f"Generated embedding is empty for text at index {idx}")
                 result[idx] = embedding
 
-            # Fill in None values with error information
+            # Raise for any skipped empty-text positions
             for idx, emb in enumerate(result):
                 if emb is None:
                     raise EmbeddingError(f"Text at index {idx} was empty or whitespace-only")
@@ -134,10 +134,32 @@ class RetrievalService:
             logger.error(f"Batch embedding generation failed for {len(texts)} texts: {e}")
             raise EmbeddingError(f"Failed to generate batch embeddings: {str(e)}", original_error=e)
 
-    @retry_with_backoff(max_retries=2, initial_delay=0.5, exceptions=(Exception,))
+    @retry_with_backoff(max_retries=2, initial_delay=0.5, exceptions=(Exception,), retryable=is_transient_error)
+    def _search_qdrant(self, collection_name: str, query_vector: List[float], limit: int) -> List[PointStruct]:
+        """
+        Raw Qdrant query with retry logic for transient failures.
+
+        Raw exceptions propagate so the decorator's retryable check sees the
+        original exception, not a wrapped VectorDBError.
+
+        Args:
+            collection_name: Name of the collection to search
+            query_vector: Query embedding vector
+            limit: Maximum number of results
+
+        Returns:
+            List of matching points
+        """
+        results = self.qdrant.query_points(
+            collection_name=collection_name,
+            query=query_vector,
+            limit=limit,
+        )
+        return results.points
+
     def search(self, collection_name: str, query_vector: List[float], limit: int) -> List[PointStruct]:
         """
-        Generic wrapper for Qdrant querying with retry logic.
+        Search collection with retry logic and structured error handling.
 
         Args:
             collection_name: Name of the collection to search
@@ -148,15 +170,10 @@ class RetrievalService:
             List of matching points
 
         Raises:
-            VectorDBError: If search operation fails
+            VectorDBError: If search operation fails after retries
         """
         try:
-            results = self.qdrant.query_points(
-                collection_name=collection_name,
-                query=query_vector,
-                limit=limit,
-            )
-            return results.points
+            return self._search_qdrant(collection_name, query_vector, limit)
         except Exception as e:
             logger.error(f"Qdrant search failed for collection '{collection_name}': {e}")
             raise VectorDBError(
@@ -269,7 +286,7 @@ class RetrievalService:
             raise VectorDBError(f"Failed to access collection '{collection}'", original_error=e)
 
         limit = n_retrieval or self.config.kb_limit
-        top_k = n_ranking or self.config.kb_limit
+        top_k = n_ranking or limit
 
         # 1. Embed (will raise EmbeddingError on failure)
         query_vector = self._embed_text(question)

@@ -39,24 +39,33 @@ def get_application(config: Config) -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(application: FastAPI):
+        # Set API key before making any LLM calls
+        os.environ["GEMINI_API_KEY"] = config.llm_api_key
+
         # Startup: initialize clients and load models
         application.state.qdrant = QdrantClient(
             host=config.kb_host, port=config.kb_port
         )
         logger.info("Qdrant client initialized")
 
-        # Load models into app state
-        application.state.models = load_models(
-            config.ROOTDIR,
-            config.bi_encoder_path,
-            config.cross_encoder_path,
-        )
-        logger.info("Models loaded into app state")
+        try:
+            # Load models into app state
+            application.state.models = load_models(
+                config.ROOTDIR,
+                config.bi_encoder_path,
+                config.cross_encoder_path,
+            )
+            logger.info("Models loaded into app state")
 
-        prompt_path = Path(config.BASEDIR) / config.prompt_path
-        with open(prompt_path) as f:
-            application.state.prompts = yaml.safe_load(f)
-        logger.info("Prompts loaded into app state")
+            prompt_path = Path(config.BASEDIR) / config.prompt_path
+            with open(prompt_path) as f:
+                application.state.prompts = yaml.safe_load(f)
+            logger.info("Prompts loaded into app state")
+
+        except Exception as e:
+            logger.error(f"Startup failed: {e}")
+            application.state.qdrant.close()
+            raise
 
         yield
 
@@ -90,9 +99,6 @@ def get_application(config: Config) -> FastAPI:
 
 Config._env_file = (f"{getenv('FASTAPI_ENV', 'dev')}.env",)
 config = Config()
-
-# Set API key as environment variable for provider-specific lookup
-os.environ["GEMINI_API_KEY"] = config.llm_api_key
 
 setup_logger(config.api_mode)
 app = get_application(config)
