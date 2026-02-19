@@ -113,7 +113,8 @@ class TestCallLLM:
 
     @patch('src.app.services.generation.completion')
     @patch('src.app.services.generation.is_transient_error')
-    def test_llm_call_retries_transient_errors(self, mock_is_transient, mock_completion, mock_request):
+    @patch('src.app.retry.time.sleep')
+    def test_llm_call_retries_transient_errors(self, mock_sleep, mock_is_transient, mock_completion, mock_request):
         """Test that transient errors are retried."""
         service = GenerationService(mock_request)
 

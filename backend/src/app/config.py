@@ -8,8 +8,6 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Config(BaseSettings):
-    _env_file: str = os.getenv("ENV_FILE", ".env")
-
     FASTAPI_ENV: constr(to_upper=True) = Field(default="DEV")
     BASEDIR: str = str(Path(__file__).resolve().parent)
     ROOTDIR: str = str(Path(__file__).resolve().parents[2])
@@ -37,7 +35,7 @@ class Config(BaseSettings):
     kb_batch_size: int = 100
 
     model_config = SettingsConfigDict(
-        env_file=_env_file,
+        env_file=(f"{os.getenv('FASTAPI_ENV', 'dev')}.env",),
         env_file_encoding="utf-8",
         extra="ignore",
         case_sensitive=False,

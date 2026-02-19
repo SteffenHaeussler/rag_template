@@ -76,10 +76,14 @@ def is_transient_error(error: Exception) -> bool:
     """
     error_message = str(error).lower()
 
-    # Common transient error patterns
+    # Common transient error patterns — use specific substrings to avoid
+    # matching non-retryable errors like "invalid connection string"
     transient_patterns = [
         "timeout",
-        "connection",
+        "connection refused",
+        "connection reset",
+        "connection timed out",
+        "connection error",
         "rate limit",
         "throttle",
         "too many requests",

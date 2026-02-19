@@ -55,10 +55,18 @@ def validate_embedding_dimension(embedding: List[float], collection_name: str, q
         qdrant: Qdrant client instance
 
     Raises:
-        HTTPException: If dimension doesn't match collection config
+        HTTPException: If dimension doesn't match or collection uses named vectors
     """
     collection_info = qdrant.get_collection(collection_name)
-    expected_dim = collection_info.config.params.vectors.size
+    vectors_config = collection_info.config.params.vectors
+
+    if not hasattr(vectors_config, 'size'):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Collection '{collection_name}' uses named vectors, which are not supported by this endpoint"
+        )
+
+    expected_dim = vectors_config.size
     actual_dim = len(embedding)
 
     if actual_dim != expected_dim:
@@ -170,7 +178,7 @@ def insert_datapoint(request: Request, datapoint: schema.DatapointCreate, collec
             PointStruct(
                 id=point_id,
                 vector=embedding,
-                payload={"text": datapoint.text, **datapoint.metadata},
+                payload={**datapoint.metadata, "text": datapoint.text},
             )
         ],
     )
@@ -185,7 +193,13 @@ def insert_bulk_datapoints(request: Request, datapoints: List[schema.DatapointCr
 
     # Fetch collection dimension once (avoids N get_collection calls)
     collection_info = qdrant.get_collection(collection_name)
-    expected_dim = collection_info.config.params.vectors.size
+    vectors_config = collection_info.config.params.vectors
+    if not hasattr(vectors_config, 'size'):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Collection '{collection_name}' uses named vectors, which are not supported by this endpoint"
+        )
+    expected_dim = vectors_config.size
 
     # Separate datapoints that need embedding from those with pre-computed embeddings
     texts_to_embed = []
@@ -228,7 +242,7 @@ def insert_bulk_datapoints(request: Request, datapoints: List[schema.DatapointCr
             PointStruct(
                 id=point_id,
                 vector=embeddings[idx],
-                payload={"text": dp.text, **dp.metadata},
+                payload={**dp.metadata, "text": dp.text},
             )
         )
 
@@ -250,7 +264,7 @@ def insert_bulk_datapoints(request: Request, datapoints: List[schema.DatapointCr
 
 
 @v1.get("/collections/{collection_name}/datapoints/{datapoint_id}", response_model=schema.DatapointResponse)
-def get_datapoint(request: Request, collection_name: str, datapoint_id: Union[str, int], qdrant: QdrantClient = Depends(get_qdrant)):
+def get_datapoint(request: Request, datapoint_id: Union[str, int], collection_name: str = Depends(verify_collection), qdrant: QdrantClient = Depends(get_qdrant)):
     datapoint_id = parse_datapoint_id(datapoint_id)
     results = qdrant.retrieve(
         collection_name=collection_name,
@@ -270,7 +284,7 @@ def get_datapoint(request: Request, collection_name: str, datapoint_id: Union[st
 
 
 @v1.get("/collections/{collection_name}/datapoints/{datapoint_id}/embedding", response_model=schema.DatapointEmbeddingResponse)
-def get_datapoint_embedding(request: Request, collection_name: str, datapoint_id: str, qdrant: QdrantClient = Depends(get_qdrant)):
+def get_datapoint_embedding(request: Request, datapoint_id: str, collection_name: str = Depends(verify_collection), qdrant: QdrantClient = Depends(get_qdrant)):
     datapoint_id = parse_datapoint_id(datapoint_id)
 
     results = qdrant.retrieve(
@@ -292,7 +306,7 @@ def get_datapoint_embedding(request: Request, collection_name: str, datapoint_id
 
 
 @v1.put("/collections/{collection_name}/datapoints/{datapoint_id}", response_model=schema.StatusResponse)
-def update_datapoint(request: Request, collection_name: str, datapoint_id: str, update_data: schema.DatapointUpdate, qdrant: QdrantClient = Depends(get_qdrant)):
+def update_datapoint(request: Request, datapoint_id: str, update_data: schema.DatapointUpdate, collection_name: str = Depends(verify_collection), qdrant: QdrantClient = Depends(get_qdrant)):
     """Update an existing datapoint."""
     datapoint_id = parse_datapoint_id(datapoint_id)
     retrieval_service = RetrievalService(request)
@@ -331,7 +345,7 @@ def update_datapoint(request: Request, collection_name: str, datapoint_id: str, 
 
 
 @v1.delete("/collections/{collection_name}/datapoints/{datapoint_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_datapoint(request: Request, collection_name: str, datapoint_id: str, qdrant: QdrantClient = Depends(get_qdrant)):
+def delete_datapoint(request: Request, datapoint_id: str, collection_name: str = Depends(verify_collection), qdrant: QdrantClient = Depends(get_qdrant)):
     datapoint_id = parse_datapoint_id(datapoint_id)
 
     qdrant.delete(

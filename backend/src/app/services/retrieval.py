@@ -1,4 +1,5 @@
 from typing import List, Dict, Any, Optional
+import math
 import numpy as np
 from qdrant_client import QdrantClient
 from qdrant_client.models import PointStruct
@@ -225,8 +226,10 @@ class RetrievalService:
             if not hasattr(outputs, "logits"):
                 raise RerankingError("Model output missing 'logits'")
 
-            # Flatten logits to a 1D array
-            scores = outputs.logits.reshape(-1).tolist()
+            # Apply sigmoid to logits so scores are in (0, 1) and
+            # comparable with bi-encoder cosine similarity scores
+            raw_logits = outputs.logits.reshape(-1).tolist()
+            scores = [1.0 / (1.0 + math.exp(-x)) for x in raw_logits]
 
             if len(scores) != len(candidates):
                 raise RerankingError(
@@ -286,7 +289,13 @@ class RetrievalService:
             raise VectorDBError(f"Failed to access collection '{collection}'", original_error=e)
 
         limit = n_retrieval or self.config.kb_limit
-        top_k = n_ranking or limit
+        requested_top_k = n_ranking or limit
+        if requested_top_k > limit:
+            logger.warning(
+                f"n_ranking ({requested_top_k}) > n_retrieval ({limit}); "
+                f"capping to {limit} (cannot rank more candidates than retrieved)"
+            )
+        top_k = min(requested_top_k, limit)
 
         # 1. Embed (will raise EmbeddingError on failure)
         query_vector = self._embed_text(question)

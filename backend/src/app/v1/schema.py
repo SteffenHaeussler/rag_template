@@ -1,5 +1,6 @@
 from typing import Any, Dict, List, Optional, Union
 import re
+import uuid as uuid_lib
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
@@ -20,6 +21,22 @@ class DatapointCreate(BaseModel):
     text: str = Field(..., min_length=1, max_length=100000)
     metadata: Dict[str, Any] = Field(default_factory=dict)
     embedding: Optional[List[float]] = Field(default=None, min_length=1, max_length=4096)
+
+    @field_validator('id')
+    @classmethod
+    def validate_id(cls, v: Optional[Union[str, int]]) -> Optional[Union[str, int]]:
+        if v is None:
+            return v
+        if isinstance(v, int):
+            if v < 0:
+                raise ValueError('Integer ID must be non-negative')
+            return v
+        # String must be a valid UUID
+        try:
+            uuid_lib.UUID(str(v))
+        except ValueError:
+            raise ValueError(f"String ID must be a valid UUID, got: '{v}'")
+        return v
 
     @field_validator('text')
     @classmethod

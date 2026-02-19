@@ -250,10 +250,12 @@ class TestRerank:
         results = service.rerank("question", candidates, 2)
 
         assert len(results) == 2
-        assert results[0].text == "doc1"  # Highest score (0.9)
-        assert results[0].score == 0.9
-        assert results[1].text == "doc3"  # Second highest (0.7)
-        assert results[1].score == 0.7
+        assert results[0].text == "doc1"  # Highest logit (0.9) → highest sigmoid
+        assert results[1].text == "doc3"  # Second highest logit (0.7) → second sigmoid
+        # Scores are sigmoid-transformed logits, so in (0, 1) and order is preserved
+        assert 0.0 < results[0].score < 1.0
+        assert 0.0 < results[1].score < 1.0
+        assert results[0].score > results[1].score
 
 
 class TestRetrieveContext:

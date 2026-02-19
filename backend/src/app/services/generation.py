@@ -2,11 +2,10 @@ from typing import List, Optional
 from fastapi import Request
 from litellm import completion
 from loguru import logger
-from src.app.v1.schema import ChatResponse
 from src.app.exceptions import GenerationError, ConfigurationError
 from src.app.retry import retry_with_backoff, is_transient_error
 
-import jinja2
+from jinja2.sandbox import SandboxedEnvironment
 
 class GenerationService:
     def __init__(self, request: Request):
@@ -38,6 +37,7 @@ class GenerationService:
             messages=[{"role": "user", "content": prompt}],
             temperature=temperature,
             timeout=30.0,  # 30 second timeout
+            api_key=self.config.llm_api_key,
         )
 
         if not response or not response.choices:
@@ -90,9 +90,9 @@ class GenerationService:
         except GenerationError:
             raise
         except Exception as e:
-            logger.error(f"LLM generation failed: {e}")
             raise GenerationError(f"LLM generation failed: {e}", original_error=e)
 
     def _render_prompt(self, template_str: str, **kwargs) -> str:
-        template = jinja2.Template(template_str)
+        env = SandboxedEnvironment()
+        template = env.from_string(template_str)
         return template.render(**kwargs)

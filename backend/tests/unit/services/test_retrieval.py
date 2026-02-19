@@ -77,10 +77,12 @@ class TestRetrievalService:
         results = service.rerank("question", candidates, 2)
 
         assert len(results) == 2
-        assert results[0].text == "high score"
-        assert results[0].score == 0.9
-        assert results[1].text == "medium score"
-        assert results[1].score == 0.5
+        assert results[0].text == "high score"   # highest logit (0.9) → highest sigmoid
+        assert results[1].text == "medium score"  # second logit (0.5)
+        # Scores are sigmoid-transformed logits, so in (0, 1)
+        assert 0.0 < results[0].score < 1.0
+        assert 0.0 < results[1].score < 1.0
+        assert results[0].score > results[1].score
 
     def test_retrieve_context(self, mock_request):
         service = RetrievalService(mock_request)

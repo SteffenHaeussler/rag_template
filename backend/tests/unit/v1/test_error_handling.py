@@ -125,7 +125,7 @@ class TestChatEndpointErrors:
 
     @patch('src.app.v1.router.GenerationService')
     def test_chat_configuration_error(self, mock_service_class, client):
-        """Test that configuration errors return 500."""
+        """Test that configuration errors return 400 (client error — bad prompt key/language)."""
         mock_service = MagicMock()
         mock_service.generate_answer.side_effect = ConfigurationError("Missing prompt")
         mock_service_class.return_value = mock_service
@@ -135,7 +135,7 @@ class TestChatEndpointErrors:
             "context": ["context1"]
         })
 
-        assert response.status_code == status.HTTP_500_INTERNAL_SERVER_ERROR
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
         assert "Configuration error" in response.json()["detail"]
 
     @patch('src.app.v1.router.GenerationService')
@@ -220,7 +220,7 @@ class TestRAGEndpointErrors:
             "collection_name": "test"
         })
 
-        assert response.status_code == status.HTTP_500_INTERNAL_SERVER_ERROR
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
         assert "Configuration error" in response.json()["detail"]
 
 

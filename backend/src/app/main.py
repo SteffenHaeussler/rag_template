@@ -1,10 +1,7 @@
 #!/usr/bin/env python
-import os
 import yaml
 from contextlib import asynccontextmanager
-from os import getenv
 from pathlib import Path
-from typing import Dict
 
 from fastapi import FastAPI
 from loguru import logger
@@ -39,9 +36,6 @@ def get_application(config: Config) -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(application: FastAPI):
-        # Set API key before making any LLM calls
-        os.environ["GEMINI_API_KEY"] = config.llm_api_key
-
         # Startup: initialize clients and load models
         application.state.qdrant = QdrantClient(
             host=config.kb_host, port=config.kb_port
@@ -97,7 +91,6 @@ def get_application(config: Config) -> FastAPI:
     return application
 
 
-Config._env_file = (f"{getenv('FASTAPI_ENV', 'dev')}.env",)
 config = Config()
 
 setup_logger(config.api_mode)

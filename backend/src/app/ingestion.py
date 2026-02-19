@@ -60,9 +60,11 @@ class DocumentIngester:
             print("  Make sure the API is running:")
             print("    - Run: make dev")
             print("    - Or: docker compose up")
+            self.client.close()
             sys.exit(1)
         except Exception as e:
             print(f"✗ Error connecting to API: {e}")
+            self.client.close()
             sys.exit(1)
 
     def load_documents(self, data_dir: str) -> List[Dict[str, str]]:
@@ -88,14 +90,6 @@ class DocumentIngester:
         if not data_path.is_dir():
             raise ValueError(f"Path is not a directory: {data_dir}")
 
-        # Check for directory traversal attempts
-        try:
-            # Ensure the resolved path is still within reasonable bounds
-            data_path.relative_to(Path.cwd().resolve())
-        except ValueError:
-            # If not relative to cwd, at least ensure it's an absolute safe path
-            if ".." in str(data_path):
-                raise ValueError(f"Invalid directory path (potential directory traversal): {data_dir}")
 
         files = list(data_path.glob("*.md")) + list(data_path.glob("*.txt"))
         if not files:
@@ -206,6 +200,7 @@ class DocumentIngester:
                 return False
             else:
                 response.raise_for_status()
+                return True  # 2xx other than 201
 
         except httpx.HTTPStatusError as e:
             if e.response.status_code == 400 and "already exists" in e.response.text.lower():

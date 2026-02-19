@@ -49,7 +49,7 @@ class TestGenerationService:
         mock_completion.assert_called_once()
         call_kwargs = mock_completion.call_args[1]
         assert call_kwargs["model"] == "test-model"
-        assert "api_key" not in call_kwargs
+        assert call_kwargs["api_key"] == "test-key"
         assert call_kwargs["temperature"] == 0.0
         # Check if prompts are formatted correctly (default en)
         assert "context1" in call_kwargs["messages"][0]["content"]
@@ -79,7 +79,7 @@ class TestGenerationService:
         assert answer == "Generated Answer DE"
         mock_completion.assert_called_once()
         call_kwargs = mock_completion.call_args[1]
-        assert "api_key" not in call_kwargs
+        assert call_kwargs["api_key"] == "test-key"
         # Check if DE prompt was used
         assert "context1 question DE" in call_kwargs["messages"][0]["content"]
         assert call_kwargs["temperature"] == 0.7

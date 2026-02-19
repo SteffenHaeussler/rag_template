@@ -51,10 +51,10 @@ async def vectordb_error_handler(request: Request, exc: VectorDBError) -> JSONRe
 
 
 async def configuration_error_handler(request: Request, exc: ConfigurationError) -> JSONResponse:
-    """Handle configuration errors."""
-    logger.error(f"Configuration error: {exc.message}")
+    """Handle configuration errors — these are client errors (bad prompt key/language)."""
+    logger.warning(f"Configuration error: {exc.message}")
     return JSONResponse(
-        status_code=500,
+        status_code=400,
         content={"detail": f"Configuration error: {exc.message}"},
     )
 
