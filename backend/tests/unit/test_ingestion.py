@@ -104,9 +104,9 @@ class TestDocumentIngester:
                     verify_api=True,
                 )
 
-    def test_load_markdown_files(self, ingester_no_verify, temp_markdown_dir):
+    def test_load_documents(self, ingester_no_verify, temp_markdown_dir):
         """Test loading markdown files from directory."""
-        documents = ingester_no_verify.load_markdown_files(str(temp_markdown_dir))
+        documents = ingester_no_verify.load_documents(str(temp_markdown_dir))
 
         assert len(documents) == 2
         assert all("filename" in doc for doc in documents)
@@ -117,17 +117,17 @@ class TestDocumentIngester:
         assert "file1.md" in filenames
         assert "file2.md" in filenames
 
-    def test_load_markdown_files_nonexistent_dir(self, ingester_no_verify):
+    def test_load_documents_nonexistent_dir(self, ingester_no_verify):
         """Test loading from non-existent directory."""
         with pytest.raises(ValueError, match="Data directory not found"):
-            ingester_no_verify.load_markdown_files("/nonexistent/path")
+            ingester_no_verify.load_documents("/nonexistent/path")
 
-    def test_load_markdown_files_empty_dir(self, ingester_no_verify, tmp_path):
+    def test_load_documents_empty_dir(self, ingester_no_verify, tmp_path):
         """Test loading from empty directory."""
         empty_dir = tmp_path / "empty"
         empty_dir.mkdir()
 
-        documents = ingester_no_verify.load_markdown_files(str(empty_dir))
+        documents = ingester_no_verify.load_documents(str(empty_dir))
         assert documents == []
 
     def test_chunk_text_simple(self, ingester_no_verify):
@@ -195,7 +195,7 @@ class TestDocumentIngester:
             mock_response.status_code = 201
             mock_post.return_value = mock_response
 
-            result = ingester_no_verify.create_collection(vector_size=384)
+            result = ingester_no_verify.create_collection()
 
             assert result is True
             mock_post.assert_called_once()
@@ -253,8 +253,9 @@ class TestDocumentIngester:
         empty_dir = tmp_path / "empty"
         empty_dir.mkdir()
 
-        with pytest.raises(ValueError, match="No markdown files found"):
-            ingester_no_verify.ingest(str(empty_dir))
+        with patch.object(ingester_no_verify, 'create_collection', return_value=True):
+            with pytest.raises(ValueError, match="No documents found"):
+                ingester_no_verify.ingest(str(empty_dir))
 
     def test_ingest_skip_collection_creation(self, ingester_no_verify, temp_markdown_dir):
         """Test ingestion with collection creation skipped."""
@@ -324,7 +325,7 @@ class TestDocumentIngester:
 
     def test_chunk_metadata(self, ingester_no_verify, temp_markdown_dir):
         """Test that chunk metadata is correctly generated."""
-        documents = ingester_no_verify.load_markdown_files(str(temp_markdown_dir))
+        documents = ingester_no_verify.load_documents(str(temp_markdown_dir))
         doc = documents[0]
 
         chunks = ingester_no_verify.chunk_text(doc["content"])

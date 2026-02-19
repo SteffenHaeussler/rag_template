@@ -188,7 +188,7 @@ class RetrievalService:
                 schema.SearchResult(
                     text=c.get("text", ""),
                     score=0.0,
-                    metadata=c
+                    metadata={k: v for k, v in c.items() if k != "text"}
                 )
                 for c in candidates[:top_k]
             ]
@@ -222,7 +222,7 @@ class RetrievalService:
                     schema.SearchResult(
                         text=content.get("text", ""),
                         score=score,
-                        metadata=content  # Pass full payload as metadata
+                        metadata={k: v for k, v in content.items() if k != "text"}
                     )
                 )
 

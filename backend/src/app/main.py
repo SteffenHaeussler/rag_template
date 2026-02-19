@@ -1,7 +1,9 @@
 #!/usr/bin/env python
 import os
+import yaml
 from contextlib import asynccontextmanager
 from os import getenv
+from pathlib import Path
 from typing import Dict
 
 from fastapi import FastAPI
@@ -50,6 +52,11 @@ def get_application(config: Config) -> FastAPI:
             config.cross_encoder_path,
         )
         logger.info("Models loaded into app state")
+
+        prompt_path = Path(config.BASEDIR) / config.prompt_path
+        with open(prompt_path) as f:
+            application.state.prompts = yaml.safe_load(f)
+        logger.info("Prompts loaded into app state")
 
         yield
 

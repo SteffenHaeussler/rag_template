@@ -60,6 +60,10 @@ def test_app(mock_qdrant, mock_models):
     app.state.qdrant = mock_qdrant
     app.state.config = Config()
     app.state.models = mock_models  # Models now in app.state, not config
+    app.state.prompts = {
+        "answer": {"en": "Answer: {{ question }} Context: {% for c in context %}{{ c }}{% endfor %}"},
+        "prompt": {"en": "Prompt: {{ question }} Context: {% for c in context %}{{ c }}{% endfor %}"},
+    }
 
     return app
 

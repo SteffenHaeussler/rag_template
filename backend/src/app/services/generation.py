@@ -14,10 +14,7 @@ class GenerationService:
     def __init__(self, request: Request):
         self.config = request.app.state.config
         self.model = self.config.generation_model
-
-        # Load prompt
-        prompt_path = Path(self.config.BASEDIR) / self.config.prompt_path
-        self.prompts = self._load_yaml(prompt_path)
+        self.prompts = request.app.state.prompts
 
     def _load_yaml(self, path: Path) -> Dict[str, Any]:
         """Load YAML file with error handling."""
@@ -29,7 +26,7 @@ class GenerationService:
         except yaml.YAMLError as e:
             raise ConfigurationError(f"Invalid YAML in prompt file: {path}", original_error=e)
 
-    @retry_with_backoff(max_retries=2, initial_delay=1.0, exceptions=(Exception,))
+    @retry_with_backoff(max_retries=2, initial_delay=1.0, exceptions=(Exception,), retryable=is_transient_error)
     def _call_llm(self, prompt: str, temperature: float) -> str:
         """
         Call LLM API with retry logic for transient failures.

@@ -25,18 +25,13 @@ def mock_request():
 
 class TestGenerationService:
     @patch("src.app.services.generation.completion")
-    @patch("builtins.open", new_callable=MagicMock)
-    @patch("src.app.services.generation.yaml.safe_load")
-    def test_generate_answer(self, mock_yaml_load, mock_open, mock_completion, mock_request):
-        mock_yaml_load.return_value = {
+    def test_generate_answer(self, mock_completion, mock_request):
+        mock_request.app.state.prompts = {
             "prompt": {
                 "en": "{% for c in context %}{{ c }} {% endfor %}{{ question }}",
                 "de": "{% for c in context %}{{ c }} {% endfor %}{{ question }} DE"
             }
         }
-
-        # Configure mock request
-        mock_request.app.state.config.prompt_path = "app/prompts/generation.yaml"
         mock_request.app.state.config.prompt_key = "prompt"
         mock_request.app.state.config.prompt_language = "en"
         mock_request.app.state.config.temperature = 0.0
@@ -60,18 +55,13 @@ class TestGenerationService:
         assert "context1" in call_kwargs["messages"][0]["content"]
 
     @patch("src.app.services.generation.completion")
-    @patch("builtins.open", new_callable=MagicMock)
-    @patch("src.app.services.generation.yaml.safe_load")
-    def test_generate_answer_dynamic(self, mock_yaml_load, mock_open, mock_completion, mock_request):
-        mock_yaml_load.return_value = {
+    def test_generate_answer_dynamic(self, mock_completion, mock_request):
+        mock_request.app.state.prompts = {
             "prompt": {
                 "en": "{% for c in context %}{{ c }} {% endfor %}{{ question }}",
                 "de": "{% for c in context %}{{ c }} {% endfor %}{{ question }} DE"
             }
         }
-
-        # Configure mock request defaults
-        mock_request.app.state.config.prompt_path = "app/prompts/generation.yaml"
         mock_request.app.state.config.prompt_key = "prompt"
         mock_request.app.state.config.prompt_language = "en"
         mock_request.app.state.config.temperature = 0.0

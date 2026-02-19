@@ -81,21 +81,14 @@ def test_chat_missing_context(client):
 
 
 def test_chat_empty_context(client):
-    """Test chat endpoint with empty context array."""
-    with patch('src.app.v1.router.GenerationService') as mock_gen_service:
-        mock_service_instance = MagicMock()
-        mock_service_instance.generate_answer.return_value = "Answer without context"
-        mock_gen_service.return_value = mock_service_instance
+    """Test chat endpoint with empty context array is rejected (min_length=1)."""
+    payload = {
+        "question": "What is AI?",
+        "context": []
+    }
+    response = client.post("/v1/chat/", json=payload)
 
-        payload = {
-            "question": "What is AI?",
-            "context": []
-        }
-        response = client.post("/v1/chat/", json=payload)
-
-        assert response.status_code == status.HTTP_200_OK
-        data = response.json()
-        assert "answer" in data
+    assert response.status_code == status.HTTP_422_UNPROCESSABLE_CONTENT
 
 
 # ==========================================

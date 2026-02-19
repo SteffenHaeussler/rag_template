@@ -1,3 +1,4 @@
+from pathlib import Path
 from typing import Dict, Any
 from optimum.onnxruntime import (
     ORTModelForFeatureExtraction,
@@ -21,17 +22,17 @@ def load_models(rootdir: str, bi_encoder_path: str, cross_encoder_path: str) -> 
     models = {}
 
     models["bi_encoder"] = ORTModelForFeatureExtraction.from_pretrained(
-        f"{rootdir}/{bi_encoder_path}"
+        str(Path(rootdir) / bi_encoder_path)
     )
     models["bi_tokenizer"] = AutoTokenizer.from_pretrained(
-        f"{rootdir}/{bi_encoder_path}"
+        str(Path(rootdir) / bi_encoder_path)
     )
 
     models["cross_encoder"] = ORTModelForSequenceClassification.from_pretrained(
-        f"{rootdir}/{cross_encoder_path}"
+        str(Path(rootdir) / cross_encoder_path)
     )
     models["cross_tokenizer"] = AutoTokenizer.from_pretrained(
-        f"{rootdir}/{cross_encoder_path}"
+        str(Path(rootdir) / cross_encoder_path)
     )
 
     return models

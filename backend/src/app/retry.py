@@ -13,6 +13,7 @@ def retry_with_backoff(
     initial_delay: float = 1.0,
     backoff_factor: float = 2.0,
     exceptions: tuple[Type[Exception], ...] = (Exception,),
+    retryable: Callable[[Exception], bool] | None = None,
 ):
     """
     Retry decorator with exponential backoff.
@@ -22,6 +23,8 @@ def retry_with_backoff(
         initial_delay: Initial delay in seconds before first retry
         backoff_factor: Multiplier for delay between retries
         exceptions: Tuple of exception types to catch and retry
+        retryable: Optional callable; if provided and returns False for an exception,
+            the exception is re-raised immediately without retrying
 
     Returns:
         Decorated function that retries on failure
@@ -37,6 +40,8 @@ def retry_with_backoff(
                 try:
                     return func(*args, **kwargs)
                 except exceptions as e:
+                    if retryable is not None and not retryable(e):
+                        raise
                     last_exception = e
 
                     if attempt < max_retries:

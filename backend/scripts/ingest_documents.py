@@ -102,8 +102,8 @@ def main():
 
             # Load documents first to show progress
             print(f"\nLoading documents from {args.data_dir}...")
-            documents = ingester.load_markdown_files(args.data_dir)
-            print(f"Found {len(documents)} markdown files")
+            documents = ingester.load_documents(args.data_dir)
+            print(f"Found {len(documents)} documents")
             for doc in documents:
                 print(f"  - {doc['filename']} ({len(doc['content'])} characters)")
 

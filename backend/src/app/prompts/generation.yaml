@@ -1,3 +1,33 @@
+answer:
+  en: |
+    You are a helpful assistant that answers questions based on the provided context.
+    Use only the information given in the context to answer the question.
+    If the context does not contain enough information to answer the question, say so clearly.
+
+    [Context]:
+    {% for item in context %}
+    {{ item }}
+    {% endfor %}
+
+    [Question]:
+    {{ question }}
+
+    Answer:
+  de: |
+    Du bist ein hilfreicher Assistent, der Fragen auf Basis des bereitgestellten Kontexts beantwortet.
+    Verwende ausschließlich die im Kontext enthaltenen Informationen, um die Frage zu beantworten.
+    Falls der Kontext nicht genügend Informationen enthält, um die Frage zu beantworten, weise deutlich darauf hin.
+
+    [Kontext]:
+    {% for item in context %}
+    {{ item }}
+    {% endfor %}
+
+    [Frage]:
+    {{ question }}
+
+    Antwort:
+
 prompt:
   en: |
     You are an expert assistant who refines and improves questions. Your task is to take an original user question and information and then combine them to create an enhanced question.

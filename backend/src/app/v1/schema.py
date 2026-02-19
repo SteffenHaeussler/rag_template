@@ -136,6 +136,10 @@ class BulkInsertResponse(BaseModel):
     inserted_count: int
 
 
+class CollectionListResponse(BaseModel):
+    collections: List[str]
+
+
 class CollectionResponse(BaseModel):
     name: str
     status: str
@@ -170,7 +174,7 @@ class QueryResponse(BaseModel):
 
 class ChatRequest(BaseModel):
     question: str = Field(..., min_length=1, max_length=10000)
-    context: List[str] = Field(..., max_length=100)
+    context: List[str] = Field(..., min_length=1, max_length=100)
     prompt_key: Optional[str] = Field(default=None, min_length=1, max_length=100)
     prompt_language: Optional[str] = Field(default=None, min_length=2, max_length=10)
     temperature: Optional[float] = Field(default=None, ge=0.0, le=2.0)

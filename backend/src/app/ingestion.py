@@ -15,6 +15,7 @@ class DocumentIngester:
         chunk_overlap: int = 50,
         batch_size: int = 50,
         verify_api: bool = True,
+        vector_size: int = 384,
     ):
         """
         Initialize the document ingester.
@@ -26,12 +27,14 @@ class DocumentIngester:
             chunk_overlap: Approximate overlapping characters
             batch_size: Batch size for bulk ingestion
             verify_api: Whether to verify API connection on init
+            vector_size: Size of the embedding vectors
         """
         self.api_base_url = api_base_url.rstrip("/")
         self.collection_name = collection_name
         self.chunk_size = chunk_size
         self.chunk_overlap = chunk_overlap
         self.batch_size = batch_size
+        self.vector_size = vector_size
         self.client = httpx.Client(timeout=60.0)
 
         # Verify API is accessible
@@ -62,12 +65,12 @@ class DocumentIngester:
             print(f"✗ Error connecting to API: {e}")
             sys.exit(1)
 
-    def load_markdown_files(self, data_dir: str) -> List[Dict[str, str]]:
+    def load_documents(self, data_dir: str) -> List[Dict[str, str]]:
         """
-        Load all markdown files from the data directory.
+        Load all markdown and text files from the data directory.
 
         Args:
-            data_dir: Directory containing markdown files
+            data_dir: Directory containing .md or .txt files
 
         Returns:
             List of document dictionaries with filename, filepath, and content
@@ -94,11 +97,11 @@ class DocumentIngester:
             if ".." in str(data_path):
                 raise ValueError(f"Invalid directory path (potential directory traversal): {data_dir}")
 
-        md_files = list(data_path.glob("*.md"))
-        if not md_files:
+        files = list(data_path.glob("*.md")) + list(data_path.glob("*.txt"))
+        if not files:
             return []
 
-        for md_file in md_files:
+        for md_file in files:
             # Additional safety check for each file
             if not md_file.is_file():
                 continue
@@ -177,12 +180,9 @@ class DocumentIngester:
 
         return chunks if chunks else [text]
 
-    def create_collection(self, vector_size: int = 384) -> bool:
+    def create_collection(self) -> bool:
         """
         Create Qdrant collection if it doesn't exist.
-
-        Args:
-            vector_size: Size of the embedding vectors
 
         Returns:
             True if collection was created, False if it already existed
@@ -195,7 +195,7 @@ class DocumentIngester:
                 f"{self.api_base_url}/v1/collections/",
                 json={
                     "name": self.collection_name,
-                    "dimension": vector_size,
+                    "dimension": self.vector_size,
                     "distance_metric": "cosine",
                 },
             )
@@ -231,10 +231,10 @@ class DocumentIngester:
             self.create_collection()
 
         # Load documents
-        documents = self.load_markdown_files(data_dir)
+        documents = self.load_documents(data_dir)
 
         if not documents:
-            raise ValueError(f"No markdown files found in {data_dir}")
+            raise ValueError(f"No documents found in {data_dir}")
 
         # Chunk documents
         all_chunks = []

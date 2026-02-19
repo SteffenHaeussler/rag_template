@@ -124,6 +124,14 @@ def health(request: Request) -> schema.HealthCheckResponse:
 # ==========================================
 
 
+@v1.get("/collections/", response_model=schema.CollectionListResponse)
+def list_collections(qdrant: QdrantClient = Depends(get_qdrant)):
+    collections = qdrant.get_collections()
+    return schema.CollectionListResponse(
+        collections=[c.name for c in collections.collections]
+    )
+
+
 @v1.post("/collections/", status_code=status.HTTP_201_CREATED, response_model=schema.CollectionResponse)
 def create_collection(request: Request, collection: schema.CollectionCreate, qdrant: QdrantClient = Depends(get_qdrant)):
     if qdrant.collection_exists(collection.name):
@@ -181,6 +189,10 @@ def insert_bulk_datapoints(request: Request, datapoints: List[schema.DatapointCr
     """Insert multiple datapoints in bulk with batch embedding for 10-50x speedup."""
     retrieval_service = RetrievalService(request)
 
+    # Fetch collection dimension once (avoids N get_collection calls)
+    collection_info = qdrant.get_collection(collection_name)
+    expected_dim = collection_info.config.params.vectors.size
+
     # Separate datapoints that need embedding from those with pre-computed embeddings
     texts_to_embed = []
     indices_to_embed = []
@@ -188,8 +200,12 @@ def insert_bulk_datapoints(request: Request, datapoints: List[schema.DatapointCr
 
     for idx, dp in enumerate(datapoints):
         if dp.embedding:
-            # Already has embedding, validate and use it
-            validate_embedding_dimension(dp.embedding, collection_name, qdrant)
+            # Already has embedding, validate inline
+            if len(dp.embedding) != expected_dim:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Embedding dimension mismatch: collection '{collection_name}' expects {expected_dim}D vectors, got {len(dp.embedding)}D"
+                )
             embeddings[idx] = dp.embedding
         else:
             # Needs embedding
@@ -203,7 +219,11 @@ def insert_bulk_datapoints(request: Request, datapoints: List[schema.DatapointCr
         # Validate dimensions and assign embeddings
         for batch_idx, dp_idx in enumerate(indices_to_embed):
             embedding = batch_embeddings[batch_idx]
-            validate_embedding_dimension(embedding, collection_name, qdrant)
+            if len(embedding) != expected_dim:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Embedding dimension mismatch: collection '{collection_name}' expects {expected_dim}D vectors, got {len(embedding)}D"
+                )
             embeddings[dp_idx] = embedding
 
     # Build points list
