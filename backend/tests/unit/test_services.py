@@ -1,42 +1,36 @@
 import pytest
 from unittest.mock import MagicMock, patch
-from fastapi import Request
-from src.app.services.retrieval import RetrievalService
 from src.app.services.generation import GenerationService
 from src.app.v1.schema import ChatRequest, ChatResponse, SearchResult
 
-@pytest.fixture
-def mock_request():
-    request = MagicMock(spec=Request)
-    request.app.state.config.models = {
-        "bi_tokenizer": MagicMock(),
-        "bi_encoder": MagicMock(),
-        "cross_tokenizer": MagicMock(),
-        "cross_encoder": MagicMock(),
-    }
-    request.app.state.config.llm_api_key = "test-key"
-    request.app.state.config.generation_model = "test-model"
-    request.app.state.config.kb_name = "test-collection"
-    request.app.state.config.kb_limit = 5
-    request.app.state.qdrant = MagicMock()
-    return request
 
+@pytest.fixture
+def mock_config():
+    config = MagicMock()
+    config.llm_api_key = "test-key"
+    config.generation_model = "test-model"
+    config.kb_name = "test-collection"
+    config.kb_limit = 5
+    config.prompt_key = "prompt"
+    config.prompt_language = "en"
+    config.temperature = 0.0
+    return config
+
+
+@pytest.fixture
+def mock_prompts():
+    return {
+        "prompt": {
+            "en": "{% for c in context %}{{ c }} {% endfor %}{{ question }}",
+            "de": "{% for c in context %}{{ c }} {% endfor %}{{ question }} DE"
+        }
+    }
 
 
 class TestGenerationService:
     @patch("src.app.services.generation.completion")
-    def test_generate_answer(self, mock_completion, mock_request):
-        mock_request.app.state.prompts = {
-            "prompt": {
-                "en": "{% for c in context %}{{ c }} {% endfor %}{{ question }}",
-                "de": "{% for c in context %}{{ c }} {% endfor %}{{ question }} DE"
-            }
-        }
-        mock_request.app.state.config.prompt_key = "prompt"
-        mock_request.app.state.config.prompt_language = "en"
-        mock_request.app.state.config.temperature = 0.0
-
-        service = GenerationService(mock_request)
+    def test_generate_answer(self, mock_completion, mock_config, mock_prompts):
+        service = GenerationService(config=mock_config, prompts=mock_prompts)
 
         # Mock litellm response
         mock_response = MagicMock()
@@ -55,18 +49,8 @@ class TestGenerationService:
         assert "context1" in call_kwargs["messages"][0]["content"]
 
     @patch("src.app.services.generation.completion")
-    def test_generate_answer_dynamic(self, mock_completion, mock_request):
-        mock_request.app.state.prompts = {
-            "prompt": {
-                "en": "{% for c in context %}{{ c }} {% endfor %}{{ question }}",
-                "de": "{% for c in context %}{{ c }} {% endfor %}{{ question }} DE"
-            }
-        }
-        mock_request.app.state.config.prompt_key = "prompt"
-        mock_request.app.state.config.prompt_language = "en"
-        mock_request.app.state.config.temperature = 0.0
-
-        service = GenerationService(mock_request)
+    def test_generate_answer_dynamic(self, mock_completion, mock_config, mock_prompts):
+        service = GenerationService(config=mock_config, prompts=mock_prompts)
 
         # Mock litellm response
         mock_response = MagicMock()

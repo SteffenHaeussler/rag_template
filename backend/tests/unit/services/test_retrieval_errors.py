@@ -10,102 +10,95 @@ from src.app.exceptions import EmbeddingError, RerankingError, VectorDBError
 
 
 @pytest.fixture
-def mock_request():
-    """Create mock request with config and models."""
-    request = MagicMock()
-    request.app.state.models = {
+def mock_qdrant():
+    return MagicMock()
+
+
+@pytest.fixture
+def mock_config():
+    config = MagicMock()
+    config.kb_name = "test-collection"
+    config.kb_limit = 10
+    return config
+
+
+@pytest.fixture
+def mock_models():
+    return {
         "bi_tokenizer": MagicMock(),
         "bi_encoder": MagicMock(),
         "cross_tokenizer": MagicMock(),
         "cross_encoder": MagicMock(),
     }
-    request.app.state.config.kb_name = "test-collection"
-    request.app.state.config.kb_limit = 10
-    request.app.state.qdrant = MagicMock()
-    return request
+
+
+@pytest.fixture
+def service(mock_qdrant, mock_config, mock_models):
+    return RetrievalService(qdrant=mock_qdrant, config=mock_config, models=mock_models)
 
 
 class TestEmbedText:
     """Test _embed_text method error handling."""
 
-    def test_embed_empty_text(self, mock_request):
+    def test_embed_empty_text(self, service):
         """Test embedding empty text raises error."""
-        service = RetrievalService(mock_request)
-
         with pytest.raises(EmbeddingError, match="Cannot embed empty text"):
             service._embed_text("")
 
-    def test_embed_whitespace_only_text(self, mock_request):
+    def test_embed_whitespace_only_text(self, service):
         """Test embedding whitespace-only text raises error."""
-        service = RetrievalService(mock_request)
-
         with pytest.raises(EmbeddingError, match="Cannot embed empty text"):
             service._embed_text("   \n  \t  ")
 
-    def test_embed_with_missing_tokenizer(self, mock_request):
+    def test_embed_with_missing_tokenizer(self, mock_qdrant, mock_config):
         """Test embedding with missing tokenizer."""
-        mock_request.app.state.models = {}  # Empty models dict
-        service = RetrievalService(mock_request)
+        service = RetrievalService(qdrant=mock_qdrant, config=mock_config, models={})
 
         with pytest.raises(EmbeddingError, match="Model configuration error"):
             service._embed_text("test text")
 
-    def test_embed_with_tokenizer_error(self, mock_request):
+    def test_embed_with_tokenizer_error(self, service, mock_models):
         """Test embedding when tokenizer fails."""
-        service = RetrievalService(mock_request)
-        mock_request.app.state.models["bi_tokenizer"].side_effect = Exception("Tokenizer failed")
+        mock_models["bi_tokenizer"].side_effect = Exception("Tokenizer failed")
 
         with pytest.raises(EmbeddingError, match="Failed to generate embedding"):
             service._embed_text("test text")
 
-    def test_embed_with_model_error(self, mock_request):
+    def test_embed_with_model_error(self, service, mock_models):
         """Test embedding when model inference fails."""
-        service = RetrievalService(mock_request)
-
-        # Mock tokenizer success but model failure
-        mock_request.app.state.models["bi_tokenizer"].return_value = {"input_ids": []}
-        mock_request.app.state.models["bi_encoder"].side_effect = RuntimeError("Model inference failed")
+        mock_models["bi_tokenizer"].return_value = {"input_ids": []}
+        mock_models["bi_encoder"].side_effect = RuntimeError("Model inference failed")
 
         with pytest.raises(EmbeddingError, match="Failed to generate embedding"):
             service._embed_text("test text")
 
-    def test_embed_with_missing_hidden_state(self, mock_request):
+    def test_embed_with_missing_hidden_state(self, service, mock_models):
         """Test embedding when model output is invalid."""
-        service = RetrievalService(mock_request)
-
-        # Mock model output without last_hidden_state
         mock_output = MagicMock(spec=[])  # No last_hidden_state attribute
-        mock_request.app.state.models["bi_tokenizer"].return_value = {"input_ids": []}
-        mock_request.app.state.models["bi_encoder"].return_value = mock_output
+        mock_models["bi_tokenizer"].return_value = {"input_ids": []}
+        mock_models["bi_encoder"].return_value = mock_output
 
         with pytest.raises(EmbeddingError, match="missing 'last_hidden_state'"):
             service._embed_text("test text")
 
-    def test_embed_with_empty_embedding(self, mock_request):
+    def test_embed_with_empty_embedding(self, service, mock_models):
         """Test embedding when result is empty."""
-        service = RetrievalService(mock_request)
-
-        # Mock empty embedding (which causes numpy to return a scalar)
         mock_output = MagicMock()
-        mock_output.last_hidden_state = np.array([[]])  # Empty
-        mock_request.app.state.config.models["bi_tokenizer"].return_value = {"input_ids": []}
-        mock_request.app.state.config.models["bi_encoder"].return_value = mock_output
+        mock_output.last_hidden_state = np.array([[[]]])  # shape (1,1,0) — zero-dim hidden state
+        mock_models["bi_tokenizer"].return_value = {"input_ids": []}
+        mock_models["bi_encoder"].return_value = mock_output
 
-        # Empty array causes numpy mean to return scalar, which fails when we try to convert to list
-        with pytest.raises(EmbeddingError, match="Failed to generate embedding"):
+        with pytest.raises(EmbeddingError):
             service._embed_text("test text")
 
-    def test_embed_successful(self, mock_request):
+    def test_embed_successful(self, service, mock_models):
         """Test successful embedding generation."""
-        service = RetrievalService(mock_request)
-
-        # Mock successful embedding - needs proper shape for mean pooling
         mock_output = MagicMock()
         # Shape: [batch_size, sequence_length, hidden_size]
         # Mean over axis=1 gives [batch_size, hidden_size]
         mock_output.last_hidden_state = np.array([[[0.1, 0.2, 0.3], [0.1, 0.2, 0.3]]])
-        mock_request.app.state.models["bi_tokenizer"].return_value = {"input_ids": []}
-        mock_request.app.state.models["bi_encoder"].return_value = mock_output
+        mock_models["bi_tokenizer"].return_value = {"input_ids": []}
+        mock_models["bi_encoder"].return_value = mock_output
 
         embedding = service._embed_text("test text")
 
@@ -117,41 +110,36 @@ class TestEmbedText:
 class TestSearch:
     """Test search method error handling."""
 
-    def test_search_with_qdrant_error(self, mock_request):
+    def test_search_with_qdrant_error(self, service, mock_qdrant):
         """Test search when Qdrant fails."""
-        service = RetrievalService(mock_request)
-        mock_request.app.state.qdrant.query_points.side_effect = Exception("Qdrant connection failed")
+        mock_qdrant.query_points.side_effect = Exception("Qdrant connection failed")
 
         with pytest.raises(VectorDBError, match="Vector search failed"):
             service.search("test-collection", [0.1, 0.2], 10)
 
-    def test_search_successful(self, mock_request):
+    def test_search_successful(self, service, mock_qdrant):
         """Test successful search."""
-        service = RetrievalService(mock_request)
-
         mock_result = MagicMock()
         mock_result.points = [MagicMock(), MagicMock()]
-        mock_request.app.state.qdrant.query_points.return_value = mock_result
+        mock_qdrant.query_points.return_value = mock_result
 
         points = service.search("test-collection", [0.1, 0.2], 10)
 
         assert len(points) == 2
-        mock_request.app.state.qdrant.query_points.assert_called_once_with(
+        mock_qdrant.query_points.assert_called_once_with(
             collection_name="test-collection",
             query=[0.1, 0.2],
             limit=10
         )
 
-    @patch('time.sleep')  # Speed up test by mocking sleep
-    def test_search_retries_on_failure(self, mock_sleep, mock_request):
+    @patch('src.app.retry.time.sleep')  # Speed up test by mocking sleep
+    def test_search_retries_on_failure(self, mock_sleep, service, mock_qdrant):
         """Test that search retries on transient failures."""
-        service = RetrievalService(mock_request)
-
         mock_result = MagicMock()
         mock_result.points = [MagicMock()]
 
         # Fail once, then succeed
-        mock_request.app.state.qdrant.query_points.side_effect = [
+        mock_qdrant.query_points.side_effect = [
             Exception("Connection timeout"),
             mock_result
         ]
@@ -159,24 +147,20 @@ class TestSearch:
         points = service.search("test-collection", [0.1, 0.2], 10)
 
         assert len(points) == 1
-        assert mock_request.app.state.qdrant.query_points.call_count == 2
+        assert mock_qdrant.query_points.call_count == 2
 
 
 class TestRerank:
     """Test rerank method error handling."""
 
-    def test_rerank_empty_candidates(self, mock_request):
+    def test_rerank_empty_candidates(self, service):
         """Test reranking with empty candidates."""
-        service = RetrievalService(mock_request)
-
         results = service.rerank("question", [], 5)
 
         assert results == []
 
-    def test_rerank_with_empty_question(self, mock_request):
+    def test_rerank_with_empty_question(self, service):
         """Test reranking with empty question."""
-        service = RetrievalService(mock_request)
-
         candidates = [{"text": "doc1"}, {"text": "doc2"}]
         results = service.rerank("", candidates, 2)
 
@@ -184,62 +168,50 @@ class TestRerank:
         assert len(results) == 2
         assert all(r.score == 0.0 for r in results)
 
-    def test_rerank_with_missing_model(self, mock_request):
+    def test_rerank_with_missing_model(self, mock_qdrant, mock_config):
         """Test reranking with missing model."""
-        mock_request.app.state.models = {}  # Empty models dict
-        service = RetrievalService(mock_request)
+        service = RetrievalService(qdrant=mock_qdrant, config=mock_config, models={})
 
         with pytest.raises(RerankingError, match="Model configuration error"):
             service.rerank("question", [{"text": "doc"}], 1)
 
-    def test_rerank_with_model_error(self, mock_request):
+    def test_rerank_with_model_error(self, service, mock_models):
         """Test reranking when model fails."""
-        service = RetrievalService(mock_request)
-
-        mock_request.app.state.models["cross_tokenizer"].return_value = {"input_ids": []}
-        mock_request.app.state.models["cross_encoder"].side_effect = RuntimeError("Model failed")
+        mock_models["cross_tokenizer"].return_value = {"input_ids": []}
+        mock_models["cross_encoder"].side_effect = RuntimeError("Model failed")
 
         with pytest.raises(RerankingError, match="Failed to rerank"):
             service.rerank("question", [{"text": "doc"}], 1)
 
-    def test_rerank_with_missing_logits(self, mock_request):
+    def test_rerank_with_missing_logits(self, service, mock_models):
         """Test reranking when model output is invalid."""
-        service = RetrievalService(mock_request)
-
-        # Mock model output without logits
         mock_output = MagicMock(spec=[])
-        mock_request.app.state.models["cross_tokenizer"].return_value = {"input_ids": []}
-        mock_request.app.state.models["cross_encoder"].return_value = mock_output
+        mock_models["cross_tokenizer"].return_value = {"input_ids": []}
+        mock_models["cross_encoder"].return_value = mock_output
 
         with pytest.raises(RerankingError, match="missing 'logits'"):
             service.rerank("question", [{"text": "doc"}], 1)
 
-    def test_rerank_with_score_count_mismatch(self, mock_request):
+    def test_rerank_with_score_count_mismatch(self, service, mock_models):
         """Test reranking when score count doesn't match candidates."""
-        service = RetrievalService(mock_request)
-
-        # Mock model returning wrong number of scores
         mock_output = MagicMock()
         mock_output.logits = MagicMock()
         mock_output.logits.reshape.return_value.tolist.return_value = [0.5]  # 1 score for 2 candidates
 
-        mock_request.app.state.models["cross_tokenizer"].return_value = {"input_ids": []}
-        mock_request.app.state.models["cross_encoder"].return_value = mock_output
+        mock_models["cross_tokenizer"].return_value = {"input_ids": []}
+        mock_models["cross_encoder"].return_value = mock_output
 
         with pytest.raises(RerankingError, match="Score count mismatch"):
             service.rerank("question", [{"text": "doc1"}, {"text": "doc2"}], 2)
 
-    def test_rerank_successful(self, mock_request):
+    def test_rerank_successful(self, service, mock_models):
         """Test successful reranking."""
-        service = RetrievalService(mock_request)
-
-        # Mock successful reranking
         mock_output = MagicMock()
         mock_output.logits = MagicMock()
         mock_output.logits.reshape.return_value.tolist.return_value = [0.9, 0.3, 0.7]
 
-        mock_request.app.state.models["cross_tokenizer"].return_value = {"input_ids": []}
-        mock_request.app.state.models["cross_encoder"].return_value = mock_output
+        mock_models["cross_tokenizer"].return_value = {"input_ids": []}
+        mock_models["cross_encoder"].return_value = mock_output
 
         candidates = [
             {"text": "doc1"},
@@ -252,7 +224,6 @@ class TestRerank:
         assert len(results) == 2
         assert results[0].text == "doc1"  # Highest logit (0.9) → highest sigmoid
         assert results[1].text == "doc3"  # Second highest logit (0.7) → second sigmoid
-        # Scores are sigmoid-transformed logits, so in (0, 1) and order is preserved
         assert 0.0 < results[0].score < 1.0
         assert 0.0 < results[1].score < 1.0
         assert results[0].score > results[1].score
@@ -261,10 +232,9 @@ class TestRerank:
 class TestRetrieveContext:
     """Test retrieve_context method error handling."""
 
-    def test_retrieve_with_nonexistent_collection(self, mock_request):
+    def test_retrieve_with_nonexistent_collection(self, service, mock_qdrant):
         """Test retrieving from nonexistent collection."""
-        service = RetrievalService(mock_request)
-        mock_request.app.state.qdrant.collection_exists.return_value = False
+        mock_qdrant.collection_exists.return_value = False
 
         with pytest.raises(HTTPException) as exc_info:
             service.retrieve_context("question", collection_name="missing")
@@ -272,29 +242,25 @@ class TestRetrieveContext:
         assert exc_info.value.status_code == 404
         assert "not found" in exc_info.value.detail
 
-    def test_retrieve_with_collection_check_error(self, mock_request):
+    def test_retrieve_with_collection_check_error(self, service, mock_qdrant):
         """Test retrieving when collection check fails."""
-        service = RetrievalService(mock_request)
-        mock_request.app.state.qdrant.collection_exists.side_effect = Exception("DB error")
+        mock_qdrant.collection_exists.side_effect = Exception("DB error")
 
         with pytest.raises(VectorDBError, match="Failed to access collection"):
             service.retrieve_context("question")
 
-    def test_retrieve_with_embedding_error(self, mock_request):
+    def test_retrieve_with_embedding_error(self, service, mock_qdrant):
         """Test retrieving when embedding fails."""
-        service = RetrievalService(mock_request)
-        mock_request.app.state.qdrant.collection_exists.return_value = True
+        mock_qdrant.collection_exists.return_value = True
 
-        # Make _embed_text fail
         service._embed_text = MagicMock(side_effect=EmbeddingError("Embedding failed"))
 
         with pytest.raises(EmbeddingError):
             service.retrieve_context("question")
 
-    def test_retrieve_with_search_error(self, mock_request):
+    def test_retrieve_with_search_error(self, service, mock_qdrant):
         """Test retrieving when search fails."""
-        service = RetrievalService(mock_request)
-        mock_request.app.state.qdrant.collection_exists.return_value = True
+        mock_qdrant.collection_exists.return_value = True
 
         service._embed_text = MagicMock(return_value=[0.1, 0.2])
         service.search = MagicMock(side_effect=VectorDBError("Search failed"))
@@ -302,10 +268,9 @@ class TestRetrieveContext:
         with pytest.raises(VectorDBError):
             service.retrieve_context("question")
 
-    def test_retrieve_with_no_results(self, mock_request):
+    def test_retrieve_with_no_results(self, service, mock_qdrant):
         """Test retrieving when no results found."""
-        service = RetrievalService(mock_request)
-        mock_request.app.state.qdrant.collection_exists.return_value = True
+        mock_qdrant.collection_exists.return_value = True
 
         service._embed_text = MagicMock(return_value=[0.1, 0.2])
         service.search = MagicMock(return_value=[])  # No results
@@ -314,10 +279,9 @@ class TestRetrieveContext:
 
         assert results == []
 
-    def test_retrieve_with_reranking_error(self, mock_request):
+    def test_retrieve_with_reranking_error(self, service, mock_qdrant):
         """Test retrieving when reranking fails."""
-        service = RetrievalService(mock_request)
-        mock_request.app.state.qdrant.collection_exists.return_value = True
+        mock_qdrant.collection_exists.return_value = True
 
         service._embed_text = MagicMock(return_value=[0.1, 0.2])
 
@@ -329,10 +293,9 @@ class TestRetrieveContext:
         with pytest.raises(RerankingError):
             service.retrieve_context("question")
 
-    def test_retrieve_successful(self, mock_request):
+    def test_retrieve_successful(self, service, mock_qdrant):
         """Test successful context retrieval."""
-        service = RetrievalService(mock_request)
-        mock_request.app.state.qdrant.collection_exists.return_value = True
+        mock_qdrant.collection_exists.return_value = True
 
         service._embed_text = MagicMock(return_value=[0.1, 0.2])
 

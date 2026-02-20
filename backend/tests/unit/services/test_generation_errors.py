@@ -18,35 +18,40 @@ def valid_prompts():
 
 
 @pytest.fixture
-def mock_request(valid_prompts):
-    """Create mock request with config."""
-    request = MagicMock()
-    request.app.state.config.generation_model = "test-model"
-    request.app.state.config.prompt_key = "default"
-    request.app.state.config.prompt_language = "en"
-    request.app.state.config.temperature = 0.0
-    request.app.state.prompts = valid_prompts
-    return request
+def mock_config():
+    """Create mock config."""
+    config = MagicMock()
+    config.generation_model = "test-model"
+    config.prompt_key = "default"
+    config.prompt_language = "en"
+    config.temperature = 0.0
+    config.llm_api_key = "test-key"
+    return config
+
+
+@pytest.fixture
+def service(mock_config, valid_prompts):
+    return GenerationService(config=mock_config, prompts=valid_prompts)
 
 
 class TestGenerationServiceInit:
     """Test GenerationService initialization."""
 
-    def test_successful_init(self, mock_request, valid_prompts):
+    def test_successful_init(self, mock_config, valid_prompts):
         """Test successful service initialization."""
-        service = GenerationService(mock_request)
+        service = GenerationService(config=mock_config, prompts=valid_prompts)
 
         assert service.model == "test-model"
         assert service.prompts == valid_prompts
 
-    def test_init_with_missing_prompt_file(self, mock_request):
+    def test_init_with_missing_prompt_file(self, mock_config):
         """Test initialization succeeds (prompt loading moved to startup)."""
-        service = GenerationService(mock_request)
-        assert service.prompts is not None
+        service = GenerationService(config=mock_config, prompts={})
+        assert service.prompts == {}
 
-    def test_init_with_invalid_yaml(self, mock_request):
+    def test_init_with_invalid_yaml(self, mock_config):
         """Test initialization succeeds when prompts are pre-loaded from app state."""
-        service = GenerationService(mock_request)
+        service = GenerationService(config=mock_config, prompts={})
         assert service.model == "test-model"
 
 
@@ -54,11 +59,8 @@ class TestCallLLM:
     """Test _call_llm method."""
 
     @patch('src.app.services.generation.completion')
-    def test_successful_llm_call(self, mock_completion, mock_request):
+    def test_successful_llm_call(self, mock_completion, service):
         """Test successful LLM call."""
-        service = GenerationService(mock_request)
-
-        # Mock LLM response
         mock_response = MagicMock()
         mock_response.choices = [MagicMock()]
         mock_response.choices[0].message.content = "Test answer"
@@ -74,11 +76,8 @@ class TestCallLLM:
         assert call_kwargs["timeout"] == 30.0
 
     @patch('src.app.services.generation.completion')
-    def test_llm_call_with_empty_response(self, mock_completion, mock_request):
+    def test_llm_call_with_empty_response(self, mock_completion, service):
         """Test LLM call with empty response."""
-        service = GenerationService(mock_request)
-
-        # Mock empty response
         mock_response = MagicMock()
         mock_response.choices = []
         mock_completion.return_value = mock_response
@@ -87,11 +86,8 @@ class TestCallLLM:
             service._call_llm("Test prompt", 0.5)
 
     @patch('src.app.services.generation.completion')
-    def test_llm_call_with_empty_content(self, mock_completion, mock_request):
+    def test_llm_call_with_empty_content(self, mock_completion, service):
         """Test LLM call with empty content."""
-        service = GenerationService(mock_request)
-
-        # Mock response with empty content
         mock_response = MagicMock()
         mock_response.choices = [MagicMock()]
         mock_response.choices[0].message.content = None
@@ -101,11 +97,9 @@ class TestCallLLM:
             service._call_llm("Test prompt", 0.5)
 
     @patch('src.app.services.generation.completion')
-    def test_llm_call_with_api_error(self, mock_completion, mock_request):
+    def test_llm_call_with_api_error(self, mock_completion, service):
         """Test that non-transient API errors propagate as-is from _call_llm.
         Wrapping into GenerationError happens in generate_answer."""
-        service = GenerationService(mock_request)
-
         mock_completion.side_effect = Exception("API error: Invalid API key")
 
         with pytest.raises(Exception, match="API error"):
@@ -114,11 +108,8 @@ class TestCallLLM:
     @patch('src.app.services.generation.completion')
     @patch('src.app.services.generation.is_transient_error')
     @patch('src.app.retry.time.sleep')
-    def test_llm_call_retries_transient_errors(self, mock_sleep, mock_is_transient, mock_completion, mock_request):
+    def test_llm_call_retries_transient_errors(self, mock_sleep, mock_is_transient, mock_completion, service):
         """Test that transient errors are retried."""
-        service = GenerationService(mock_request)
-
-        # Mock transient error followed by success
         mock_response = MagicMock()
         mock_response.choices = [MagicMock()]
         mock_response.choices[0].message.content = "Success"
@@ -139,11 +130,8 @@ class TestGenerateAnswer:
     """Test generate_answer method."""
 
     @patch('src.app.services.generation.completion')
-    def test_successful_generation(self, mock_completion, mock_request):
+    def test_successful_generation(self, mock_completion, service):
         """Test successful answer generation."""
-        service = GenerationService(mock_request)
-
-        # Mock LLM response
         mock_response = MagicMock()
         mock_response.choices = [MagicMock()]
         mock_response.choices[0].message.content = "Generated answer"
@@ -157,10 +145,8 @@ class TestGenerateAnswer:
         assert result == "Generated answer"
 
     @patch('src.app.services.generation.completion')
-    def test_generation_with_missing_prompt_key(self, mock_completion, mock_request):
+    def test_generation_with_missing_prompt_key(self, mock_completion, service):
         """Test generation with missing prompt key."""
-        service = GenerationService(mock_request)
-
         with pytest.raises(ConfigurationError, match="Prompt not found"):
             service.generate_answer(
                 question="Test",
@@ -169,10 +155,8 @@ class TestGenerateAnswer:
             )
 
     @patch('src.app.services.generation.completion')
-    def test_generation_with_missing_language(self, mock_completion, mock_request):
+    def test_generation_with_missing_language(self, mock_completion, service):
         """Test generation with missing language."""
-        service = GenerationService(mock_request)
-
         with pytest.raises(ConfigurationError, match="Prompt not found"):
             service.generate_answer(
                 question="Test",
@@ -181,14 +165,14 @@ class TestGenerateAnswer:
             )
 
     @patch('src.app.services.generation.completion')
-    def test_generation_with_template_error(self, mock_completion, mock_request):
+    def test_generation_with_template_error(self, mock_completion, mock_config):
         """Test generation with template rendering error."""
-        mock_request.app.state.prompts = {
+        prompts = {
             "default": {
                 "en": "{{ question|invalid_filter }}"  # Invalid Jinja2 filter
             }
         }
-        service = GenerationService(mock_request)
+        service = GenerationService(config=mock_config, prompts=prompts)
 
         with pytest.raises(GenerationError, match="Failed to render prompt"):
             service.generate_answer(
@@ -197,10 +181,8 @@ class TestGenerateAnswer:
             )
 
     @patch('src.app.services.generation.completion')
-    def test_generation_with_custom_temperature(self, mock_completion, mock_request):
+    def test_generation_with_custom_temperature(self, mock_completion, service):
         """Test generation with custom temperature."""
-        service = GenerationService(mock_request)
-
         mock_response = MagicMock()
         mock_response.choices = [MagicMock()]
         mock_response.choices[0].message.content = "Answer"
@@ -212,15 +194,12 @@ class TestGenerateAnswer:
             temperature=0.9
         )
 
-        # Check that custom temperature was used
         call_kwargs = mock_completion.call_args.kwargs
         assert call_kwargs["temperature"] == 0.9
 
     @patch('src.app.services.generation.completion')
-    def test_generation_propagates_llm_error(self, mock_completion, mock_request):
+    def test_generation_propagates_llm_error(self, mock_completion, service):
         """Test that LLM errors are propagated."""
-        service = GenerationService(mock_request)
-
         mock_completion.side_effect = Exception("LLM API error")
 
         with pytest.raises(GenerationError):

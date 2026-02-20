@@ -1,6 +1,6 @@
-# fastapi_skeleton
+# Rag Template
 
-Simple fastapi skeleton for a stateless microservice (application for main models, optimization, ...)
+Experimenting with Claude Code and my simple fastapi skeleton for a RAG application. Try to learn and understand, what can be improved and how it would look like.
 
 ## Architecture
 

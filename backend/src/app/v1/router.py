@@ -2,7 +2,7 @@ import uuid
 from time import time
 from typing import List, Union
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from qdrant_client import QdrantClient
 from loguru import logger
 
@@ -10,6 +10,13 @@ from qdrant_client.models import Distance, PointStruct, VectorParams
 
 import src.app.v1.schema as schema
 
+from src.app.config import Config
+from src.app.dependencies import (
+    get_config,
+    get_qdrant,
+    get_retrieval_service,
+    get_generation_service,
+)
 from src.app.services.retrieval import RetrievalService
 from src.app.services.generation import GenerationService
 
@@ -26,11 +33,6 @@ DISTANCE_MAP = {
 # ==========================================
 # Dependencies
 # ==========================================
-
-
-def get_qdrant(request: Request) -> QdrantClient:
-    """Get Qdrant client from request state."""
-    return request.app.state.qdrant
 
 
 def verify_collection(collection_name: str, qdrant: QdrantClient = Depends(get_qdrant)) -> str:
@@ -117,8 +119,8 @@ def parse_datapoint_id(datapoint_id: str) -> Union[str, int]:
 
 
 @v1.get("/health", response_model=schema.HealthCheckResponse)
-def health(request: Request) -> schema.HealthCheckResponse:
-    return {"version": request.app.state.config.VERSION, "timestamp": time()}
+def health(config: Config = Depends(get_config)) -> schema.HealthCheckResponse:
+    return {"version": config.VERSION, "timestamp": time()}
 
 
 # ==========================================
@@ -135,7 +137,7 @@ def list_collections(qdrant: QdrantClient = Depends(get_qdrant)):
 
 
 @v1.post("/collections/", status_code=status.HTTP_201_CREATED, response_model=schema.CollectionResponse)
-def create_collection(request: Request, collection: schema.CollectionCreate, qdrant: QdrantClient = Depends(get_qdrant)):
+def create_collection(collection: schema.CollectionCreate, qdrant: QdrantClient = Depends(get_qdrant)):
     if qdrant.collection_exists(collection.name):
         raise HTTPException(status_code=400, detail="Collection already exists")
 
@@ -152,7 +154,7 @@ def create_collection(request: Request, collection: schema.CollectionCreate, qdr
 
 
 @v1.delete("/collections/{collection_name}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_collection(request: Request, collection_name: str = Depends(verify_collection), qdrant: QdrantClient = Depends(get_qdrant)):
+def delete_collection(collection_name: str = Depends(verify_collection), qdrant: QdrantClient = Depends(get_qdrant)):
     qdrant.delete_collection(collection_name)
 
 
@@ -162,11 +164,15 @@ def delete_collection(request: Request, collection_name: str = Depends(verify_co
 
 
 @v1.post("/collections/{collection_name}/datapoints/", status_code=status.HTTP_201_CREATED, response_model=schema.StatusResponse)
-def insert_datapoint(request: Request, datapoint: schema.DatapointCreate, collection_name: str = Depends(verify_collection), qdrant: QdrantClient = Depends(get_qdrant)):
+def insert_datapoint(
+    datapoint: schema.DatapointCreate,
+    collection_name: str = Depends(verify_collection),
+    qdrant: QdrantClient = Depends(get_qdrant),
+    retrieval_service: RetrievalService = Depends(get_retrieval_service),
+):
     """Insert a single datapoint into collection."""
     point_id = datapoint.id or str(uuid.uuid4())
 
-    retrieval_service = RetrievalService(request)
     embedding = datapoint.embedding or retrieval_service._embed_text(datapoint.text)
 
     # Validate embedding dimension
@@ -187,10 +193,14 @@ def insert_datapoint(request: Request, datapoint: schema.DatapointCreate, collec
 
 
 @v1.post("/collections/{collection_name}/datapoints/bulk", status_code=status.HTTP_201_CREATED, response_model=schema.BulkInsertResponse)
-def insert_bulk_datapoints(request: Request, datapoints: List[schema.DatapointCreate], collection_name: str = Depends(verify_collection), qdrant: QdrantClient = Depends(get_qdrant)):
+def insert_bulk_datapoints(
+    datapoints: List[schema.DatapointCreate],
+    collection_name: str = Depends(verify_collection),
+    qdrant: QdrantClient = Depends(get_qdrant),
+    config: Config = Depends(get_config),
+    retrieval_service: RetrievalService = Depends(get_retrieval_service),
+):
     """Insert multiple datapoints in bulk with batch embedding for 10-50x speedup."""
-    retrieval_service = RetrievalService(request)
-
     # Fetch collection dimension once (avoids N get_collection calls)
     collection_info = qdrant.get_collection(collection_name)
     vectors_config = collection_info.config.params.vectors
@@ -247,7 +257,7 @@ def insert_bulk_datapoints(request: Request, datapoints: List[schema.DatapointCr
         )
 
     # Batch upsert to Qdrant
-    batch_size = request.app.state.config.kb_batch_size
+    batch_size = config.kb_batch_size
     for i in range(0, len(points), batch_size):
         qdrant.upsert(
             collection_name=collection_name,
@@ -264,7 +274,7 @@ def insert_bulk_datapoints(request: Request, datapoints: List[schema.DatapointCr
 
 
 @v1.get("/collections/{collection_name}/datapoints/{datapoint_id}", response_model=schema.DatapointResponse)
-def get_datapoint(request: Request, datapoint_id: Union[str, int], collection_name: str = Depends(verify_collection), qdrant: QdrantClient = Depends(get_qdrant)):
+def get_datapoint(datapoint_id: Union[str, int], collection_name: str = Depends(verify_collection), qdrant: QdrantClient = Depends(get_qdrant)):
     datapoint_id = parse_datapoint_id(datapoint_id)
     results = qdrant.retrieve(
         collection_name=collection_name,
@@ -284,7 +294,7 @@ def get_datapoint(request: Request, datapoint_id: Union[str, int], collection_na
 
 
 @v1.get("/collections/{collection_name}/datapoints/{datapoint_id}/embedding", response_model=schema.DatapointEmbeddingResponse)
-def get_datapoint_embedding(request: Request, datapoint_id: str, collection_name: str = Depends(verify_collection), qdrant: QdrantClient = Depends(get_qdrant)):
+def get_datapoint_embedding(datapoint_id: str, collection_name: str = Depends(verify_collection), qdrant: QdrantClient = Depends(get_qdrant)):
     datapoint_id = parse_datapoint_id(datapoint_id)
 
     results = qdrant.retrieve(
@@ -306,10 +316,15 @@ def get_datapoint_embedding(request: Request, datapoint_id: str, collection_name
 
 
 @v1.put("/collections/{collection_name}/datapoints/{datapoint_id}", response_model=schema.StatusResponse)
-def update_datapoint(request: Request, datapoint_id: str, update_data: schema.DatapointUpdate, collection_name: str = Depends(verify_collection), qdrant: QdrantClient = Depends(get_qdrant)):
+def update_datapoint(
+    datapoint_id: str,
+    update_data: schema.DatapointUpdate,
+    collection_name: str = Depends(verify_collection),
+    qdrant: QdrantClient = Depends(get_qdrant),
+    retrieval_service: RetrievalService = Depends(get_retrieval_service),
+):
     """Update an existing datapoint."""
     datapoint_id = parse_datapoint_id(datapoint_id)
-    retrieval_service = RetrievalService(request)
 
     # Check point exists
     results = qdrant.retrieve(
@@ -345,7 +360,7 @@ def update_datapoint(request: Request, datapoint_id: str, update_data: schema.Da
 
 
 @v1.delete("/collections/{collection_name}/datapoints/{datapoint_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_datapoint(request: Request, datapoint_id: str, collection_name: str = Depends(verify_collection), qdrant: QdrantClient = Depends(get_qdrant)):
+def delete_datapoint(datapoint_id: str, collection_name: str = Depends(verify_collection), qdrant: QdrantClient = Depends(get_qdrant)):
     datapoint_id = parse_datapoint_id(datapoint_id)
 
     qdrant.delete(
@@ -359,17 +374,15 @@ def delete_datapoint(request: Request, datapoint_id: str, collection_name: str =
 
 
 @v1.post("/embedding/", response_model=schema.EmbeddingResponse)
-def embedding(request: Request, body: schema.EmbeddingRequest) -> schema.EmbeddingResponse:
+def embedding(body: schema.EmbeddingRequest, retrieval_service: RetrievalService = Depends(get_retrieval_service)) -> schema.EmbeddingResponse:
     """Generate embedding for text."""
-    retrieval_service = RetrievalService(request)
     mean_embedding = retrieval_service._embed_text(body.text)
     return schema.EmbeddingResponse(text=body.text, embedding=mean_embedding)
 
 
 @v1.post("/ranking/")
-def ranking(request: Request, body: schema.RankingRequest) -> schema.RankingResponse:
+def ranking(body: schema.RankingRequest, retrieval_service: RetrievalService = Depends(get_retrieval_service)) -> schema.RankingResponse:
     """Rerank texts by relevance to question."""
-    retrieval_service = RetrievalService(request)
     candidates = [{"text": text} for text in body.texts]
     ranked_results = retrieval_service.rerank(
         question=body.question,
@@ -381,15 +394,18 @@ def ranking(request: Request, body: schema.RankingRequest) -> schema.RankingResp
 
 
 @v1.post("/collections/{collection_name}/search/", response_model=schema.SearchResponse)
-def search(request: Request, collection_name: str, body: schema.SearchRequest, qdrant: QdrantClient = Depends(get_qdrant)) -> schema.SearchResponse:
+def search(
+    collection_name: str,
+    body: schema.SearchRequest,
+    qdrant: QdrantClient = Depends(get_qdrant),
+    config: Config = Depends(get_config),
+    retrieval_service: RetrievalService = Depends(get_retrieval_service),
+) -> schema.SearchResponse:
     """Search collection using embedding vector."""
-    config = request.app.state.config
     n_items = body.n_retrieval or config.kb_limit
 
     # Validate embedding dimension
     validate_embedding_dimension(body.embedding, collection_name, qdrant)
-
-    retrieval_service = RetrievalService(request)
 
     points = retrieval_service.search(
             collection_name=collection_name,
@@ -410,10 +426,8 @@ def search(request: Request, collection_name: str, body: schema.SearchRequest, q
 
 
 @v1.post("/query/", response_model=schema.QueryResponse)
-def full_rag_pipeline(request: Request, body: schema.QueryRequest, qdrant: QdrantClient = Depends(get_qdrant)) -> schema.QueryResponse:
+def full_rag_pipeline(body: schema.QueryRequest, retrieval_service: RetrievalService = Depends(get_retrieval_service)) -> schema.QueryResponse:
     """Retrieve context: embed query, search, and rerank."""
-    retrieval_service = RetrievalService(request)
-
     final_results = retrieval_service.retrieve_context(
         question=body.question,
         collection_name=body.collection_name,
@@ -425,9 +439,8 @@ def full_rag_pipeline(request: Request, body: schema.QueryRequest, qdrant: Qdran
 
 
 @v1.post("/chat/", response_model=schema.ChatResponse)
-def chat(request: Request, body: schema.ChatRequest) -> schema.ChatResponse:
+def chat(body: schema.ChatRequest, generation_service: GenerationService = Depends(get_generation_service)) -> schema.ChatResponse:
     """Generate answer from provided context (no retrieval)."""
-    generation_service = GenerationService(request)
     answer = generation_service.generate_answer(
         question=body.question,
         context=body.context,
@@ -440,10 +453,12 @@ def chat(request: Request, body: schema.ChatRequest) -> schema.ChatResponse:
 
 
 @v1.post("/rag/", response_model=schema.ChatResponse)
-def rag(request: Request, body: schema.RagRequest, qdrant: QdrantClient = Depends(get_qdrant)) -> schema.ChatResponse:
+def rag(
+    body: schema.RagRequest,
+    retrieval_service: RetrievalService = Depends(get_retrieval_service),
+    generation_service: GenerationService = Depends(get_generation_service),
+) -> schema.ChatResponse:
     """Full RAG pipeline: Retrieve context from collection + Generate answer."""
-    retrieval_service = RetrievalService(request)
-
     # Retrieve context
     final_results = retrieval_service.retrieve_context(
         question=body.question,
@@ -455,7 +470,6 @@ def rag(request: Request, body: schema.RagRequest, qdrant: QdrantClient = Depend
     context_texts = [result.text for result in final_results]
 
     # Generate Answer
-    generation_service = GenerationService(request)
     answer = generation_service.generate_answer(
         question=body.question,
         context=context_texts,

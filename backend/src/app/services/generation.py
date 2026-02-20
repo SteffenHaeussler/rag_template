@@ -1,17 +1,17 @@
-from typing import List, Optional
-from fastapi import Request
+from typing import Any, Dict, List, Optional
 from litellm import completion
 from loguru import logger
+from src.app.config import Config
 from src.app.exceptions import GenerationError, ConfigurationError
 from src.app.retry import retry_with_backoff, is_transient_error
 
 from jinja2.sandbox import SandboxedEnvironment
 
 class GenerationService:
-    def __init__(self, request: Request):
-        self.config = request.app.state.config
-        self.model = self.config.generation_model
-        self.prompts = request.app.state.prompts
+    def __init__(self, config: Config, prompts: Dict[str, Any]):
+        self.config = config
+        self.model = config.generation_model
+        self.prompts = prompts
 
     @retry_with_backoff(max_retries=2, initial_delay=1.0, exceptions=(Exception,), retryable=is_transient_error)
     def _call_llm(self, prompt: str, temperature: float) -> str:

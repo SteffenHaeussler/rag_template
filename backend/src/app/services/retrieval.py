@@ -3,18 +3,18 @@ import math
 import numpy as np
 from qdrant_client import QdrantClient
 from qdrant_client.models import PointStruct
-from fastapi import Request, HTTPException
+from fastapi import HTTPException
 from loguru import logger
 import src.app.v1.schema as schema
+from src.app.config import Config
 from src.app.exceptions import EmbeddingError, RerankingError, VectorDBError
 from src.app.retry import retry_with_backoff, is_transient_error
 
 class RetrievalService:
-    def __init__(self, request: Request):
-        self.request = request
-        self.config = request.app.state.config
-        self.models = request.app.state.models
-        self.qdrant: QdrantClient = request.app.state.qdrant
+    def __init__(self, qdrant: QdrantClient, config: Config, models: Dict[str, Any]):
+        self.qdrant = qdrant
+        self.config = config
+        self.models = models
 
     def _embed_text(self, text: str) -> List[float]:
         """
