@@ -5,7 +5,7 @@ from pathlib import Path
 
 from fastapi import FastAPI
 from loguru import logger
-from qdrant_client import QdrantClient
+from qdrant_client import AsyncQdrantClient
 
 from src.app.config import Config
 from src.app.core import router as core_router
@@ -37,7 +37,7 @@ def get_application(config: Config) -> FastAPI:
     @asynccontextmanager
     async def lifespan(application: FastAPI):
         # Startup: initialize clients and load models
-        application.state.qdrant = QdrantClient(
+        application.state.qdrant = AsyncQdrantClient(
             host=config.kb_host, port=config.kb_port
         )
         logger.info("Qdrant client initialized")
@@ -58,13 +58,13 @@ def get_application(config: Config) -> FastAPI:
 
         except Exception as e:
             logger.error(f"Startup failed: {e}")
-            application.state.qdrant.close()
+            await application.state.qdrant.close()
             raise
 
         yield
 
         # Shutdown: clean up
-        application.state.qdrant.close()
+        await application.state.qdrant.close()
         logger.info("Clients shut down")
 
     request_timer = RequestTimer()

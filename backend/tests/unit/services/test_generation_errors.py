@@ -1,7 +1,7 @@
 """Tests for GenerationService error handling."""
 
 import pytest
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, AsyncMock, patch
 
 from src.app.services.generation import GenerationService
 from src.app.exceptions import GenerationError, ConfigurationError
@@ -58,114 +58,114 @@ class TestGenerationServiceInit:
 class TestCallLLM:
     """Test _call_llm method."""
 
-    @patch('src.app.services.generation.completion')
-    def test_successful_llm_call(self, mock_completion, service):
+    @patch('src.app.services.generation.acompletion', new_callable=AsyncMock)
+    async def test_successful_llm_call(self, mock_acompletion, service):
         """Test successful LLM call."""
         mock_response = MagicMock()
         mock_response.choices = [MagicMock()]
         mock_response.choices[0].message.content = "Test answer"
-        mock_completion.return_value = mock_response
+        mock_acompletion.return_value = mock_response
 
-        result = service._call_llm("Test prompt", 0.5)
+        result = await service._call_llm("Test prompt", 0.5)
 
         assert result == "Test answer"
-        mock_completion.assert_called_once()
-        call_kwargs = mock_completion.call_args.kwargs
+        mock_acompletion.assert_called_once()
+        call_kwargs = mock_acompletion.call_args.kwargs
         assert call_kwargs["model"] == "test-model"
         assert call_kwargs["temperature"] == 0.5
         assert call_kwargs["timeout"] == 30.0
 
-    @patch('src.app.services.generation.completion')
-    def test_llm_call_with_empty_response(self, mock_completion, service):
+    @patch('src.app.services.generation.acompletion', new_callable=AsyncMock)
+    async def test_llm_call_with_empty_response(self, mock_acompletion, service):
         """Test LLM call with empty response."""
         mock_response = MagicMock()
         mock_response.choices = []
-        mock_completion.return_value = mock_response
+        mock_acompletion.return_value = mock_response
 
         with pytest.raises(GenerationError, match="empty response"):
-            service._call_llm("Test prompt", 0.5)
+            await service._call_llm("Test prompt", 0.5)
 
-    @patch('src.app.services.generation.completion')
-    def test_llm_call_with_empty_content(self, mock_completion, service):
+    @patch('src.app.services.generation.acompletion', new_callable=AsyncMock)
+    async def test_llm_call_with_empty_content(self, mock_acompletion, service):
         """Test LLM call with empty content."""
         mock_response = MagicMock()
         mock_response.choices = [MagicMock()]
         mock_response.choices[0].message.content = None
-        mock_completion.return_value = mock_response
+        mock_acompletion.return_value = mock_response
 
         with pytest.raises(GenerationError, match="empty content"):
-            service._call_llm("Test prompt", 0.5)
+            await service._call_llm("Test prompt", 0.5)
 
-    @patch('src.app.services.generation.completion')
-    def test_llm_call_with_api_error(self, mock_completion, service):
+    @patch('src.app.services.generation.acompletion', new_callable=AsyncMock)
+    async def test_llm_call_with_api_error(self, mock_acompletion, service):
         """Test that non-transient API errors propagate as-is from _call_llm.
         Wrapping into GenerationError happens in generate_answer."""
-        mock_completion.side_effect = Exception("API error: Invalid API key")
+        mock_acompletion.side_effect = Exception("API error: Invalid API key")
 
         with pytest.raises(Exception, match="API error"):
-            service._call_llm("Test prompt", 0.5)
+            await service._call_llm("Test prompt", 0.5)
 
-    @patch('src.app.services.generation.completion')
+    @patch('src.app.services.generation.acompletion', new_callable=AsyncMock)
     @patch('src.app.services.generation.is_transient_error')
-    @patch('src.app.retry.time.sleep')
-    def test_llm_call_retries_transient_errors(self, mock_sleep, mock_is_transient, mock_completion, service):
+    @patch('src.app.retry.asyncio.sleep', new_callable=AsyncMock)
+    async def test_llm_call_retries_transient_errors(self, mock_sleep, mock_is_transient, mock_acompletion, service):
         """Test that transient errors are retried."""
         mock_response = MagicMock()
         mock_response.choices = [MagicMock()]
         mock_response.choices[0].message.content = "Success"
 
-        mock_completion.side_effect = [
+        mock_acompletion.side_effect = [
             Exception("Rate limit exceeded"),
             mock_response
         ]
         mock_is_transient.return_value = True
 
-        result = service._call_llm("Test prompt", 0.5)
+        result = await service._call_llm("Test prompt", 0.5)
 
         assert result == "Success"
-        assert mock_completion.call_count == 2  # 1 failure + 1 success
+        assert mock_acompletion.call_count == 2  # 1 failure + 1 success
 
 
 class TestGenerateAnswer:
     """Test generate_answer method."""
 
-    @patch('src.app.services.generation.completion')
-    def test_successful_generation(self, mock_completion, service):
+    @patch('src.app.services.generation.acompletion', new_callable=AsyncMock)
+    async def test_successful_generation(self, mock_acompletion, service):
         """Test successful answer generation."""
         mock_response = MagicMock()
         mock_response.choices = [MagicMock()]
         mock_response.choices[0].message.content = "Generated answer"
-        mock_completion.return_value = mock_response
+        mock_acompletion.return_value = mock_response
 
-        result = service.generate_answer(
+        result = await service.generate_answer(
             question="What is AI?",
             context=["AI is artificial intelligence"]
         )
 
         assert result == "Generated answer"
 
-    @patch('src.app.services.generation.completion')
-    def test_generation_with_missing_prompt_key(self, mock_completion, service):
+    @patch('src.app.services.generation.acompletion', new_callable=AsyncMock)
+    async def test_generation_with_missing_prompt_key(self, mock_acompletion, service):
         """Test generation with missing prompt key."""
         with pytest.raises(ConfigurationError, match="Prompt not found"):
-            service.generate_answer(
+            await service.generate_answer(
                 question="Test",
                 context=["Context"],
                 prompt_key="nonexistent"
             )
 
-    @patch('src.app.services.generation.completion')
-    def test_generation_with_missing_language(self, mock_completion, service):
+    @patch('src.app.services.generation.acompletion', new_callable=AsyncMock)
+    async def test_generation_with_missing_language(self, mock_acompletion, service):
         """Test generation with missing language."""
         with pytest.raises(ConfigurationError, match="Prompt not found"):
-            service.generate_answer(
+            await service.generate_answer(
                 question="Test",
                 context=["Context"],
                 prompt_language="es"
             )
 
-    @patch('src.app.services.generation.completion')
-    def test_generation_with_template_error(self, mock_completion, mock_config):
+    @patch('src.app.services.generation.acompletion', new_callable=AsyncMock)
+    async def test_generation_with_template_error(self, mock_acompletion, mock_config):
         """Test generation with template rendering error."""
         prompts = {
             "default": {
@@ -175,35 +175,35 @@ class TestGenerateAnswer:
         service = GenerationService(config=mock_config, prompts=prompts)
 
         with pytest.raises(GenerationError, match="Failed to render prompt"):
-            service.generate_answer(
+            await service.generate_answer(
                 question="Test",
                 context=["Context"]
             )
 
-    @patch('src.app.services.generation.completion')
-    def test_generation_with_custom_temperature(self, mock_completion, service):
+    @patch('src.app.services.generation.acompletion', new_callable=AsyncMock)
+    async def test_generation_with_custom_temperature(self, mock_acompletion, service):
         """Test generation with custom temperature."""
         mock_response = MagicMock()
         mock_response.choices = [MagicMock()]
         mock_response.choices[0].message.content = "Answer"
-        mock_completion.return_value = mock_response
+        mock_acompletion.return_value = mock_response
 
-        service.generate_answer(
+        await service.generate_answer(
             question="Test",
             context=["Context"],
             temperature=0.9
         )
 
-        call_kwargs = mock_completion.call_args.kwargs
+        call_kwargs = mock_acompletion.call_args.kwargs
         assert call_kwargs["temperature"] == 0.9
 
-    @patch('src.app.services.generation.completion')
-    def test_generation_propagates_llm_error(self, mock_completion, service):
+    @patch('src.app.services.generation.acompletion', new_callable=AsyncMock)
+    async def test_generation_propagates_llm_error(self, mock_acompletion, service):
         """Test that LLM errors are propagated."""
-        mock_completion.side_effect = Exception("LLM API error")
+        mock_acompletion.side_effect = Exception("LLM API error")
 
         with pytest.raises(GenerationError):
-            service.generate_answer(
+            await service.generate_answer(
                 question="Test",
                 context=["Context"]
             )

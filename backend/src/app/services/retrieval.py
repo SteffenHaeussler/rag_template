@@ -1,22 +1,23 @@
+import asyncio
 from typing import List, Dict, Any, Optional
 import math
 import numpy as np
-from qdrant_client import QdrantClient
+from qdrant_client import AsyncQdrantClient
 from qdrant_client.models import PointStruct
 from fastapi import HTTPException
 from loguru import logger
 import src.app.v1.schema as schema
 from src.app.config import Config
 from src.app.exceptions import EmbeddingError, RerankingError, VectorDBError
-from src.app.retry import retry_with_backoff, is_transient_error
+from src.app.retry import async_retry_with_backoff, is_transient_error
 
 class RetrievalService:
-    def __init__(self, qdrant: QdrantClient, config: Config, models: Dict[str, Any]):
+    def __init__(self, qdrant: AsyncQdrantClient, config: Config, models: Dict[str, Any]):
         self.qdrant = qdrant
         self.config = config
         self.models = models
 
-    def _embed_text(self, text: str) -> List[float]:
+    async def _embed_text(self, text: str) -> List[float]:
         """
         Generate embedding for text using the bi-encoder.
 
@@ -35,11 +36,14 @@ class RetrievalService:
         try:
             tokenizer = self.models["bi_tokenizer"]
             model = self.models["bi_encoder"]
+        except KeyError as e:
+            logger.error(f"Model or tokenizer not found in config: {e}")
+            raise EmbeddingError(f"Model configuration error: {e}", original_error=e)
 
+        def _infer():
             inputs = tokenizer(
                 text, padding=True, truncation=True, return_tensors="np", max_length=512
             )
-
             outputs = model(**inputs)
 
             if not hasattr(outputs, "last_hidden_state"):
@@ -52,14 +56,15 @@ class RetrievalService:
 
             return embedding
 
-        except KeyError as e:
-            logger.error(f"Model or tokenizer not found in config: {e}")
-            raise EmbeddingError(f"Model configuration error: {e}", original_error=e)
+        try:
+            return await asyncio.to_thread(_infer)
+        except EmbeddingError:
+            raise
         except Exception as e:
             logger.error(f"Embedding generation failed for text (length={len(text)}): {e}")
             raise EmbeddingError(f"Failed to generate embedding: {str(e)}", original_error=e)
 
-    def _embed_texts_batch(self, texts: List[str]) -> List[List[float]]:
+    async def _embed_texts_batch(self, texts: List[str]) -> List[List[float]]:
         """
         Generate embeddings for multiple texts in a batch (10-50x faster than one-by-one).
 
@@ -89,8 +94,11 @@ class RetrievalService:
         try:
             tokenizer = self.models["bi_tokenizer"]
             model = self.models["bi_encoder"]
+        except KeyError as e:
+            logger.error(f"Model or tokenizer not found: {e}")
+            raise EmbeddingError(f"Model configuration error: {e}", original_error=e)
 
-            # Batch tokenization - much faster than one-by-one
+        def _infer_batch():
             inputs = tokenizer(
                 valid_texts,
                 padding=True,
@@ -99,14 +107,11 @@ class RetrievalService:
                 max_length=512
             )
 
-            # Batch inference - this is where we get the big speedup
             outputs = model(**inputs)
 
             if not hasattr(outputs, "last_hidden_state"):
                 raise EmbeddingError("Model output missing 'last_hidden_state'")
 
-            # Mean pooling across sequence dimension (axis=1)
-            # Shape: [batch_size, seq_len, hidden_size] -> [batch_size, hidden_size]
             embeddings = np.mean(outputs.last_hidden_state, axis=1).tolist()
 
             if len(embeddings) != len(valid_texts):
@@ -114,29 +119,28 @@ class RetrievalService:
                     f"Embedding count mismatch: expected {len(valid_texts)}, got {len(embeddings)}"
                 )
 
-            # Reconstruct full list preserving original indices
             result = [None] * len(texts)
             for idx, embedding in zip(valid_indices, embeddings):
                 if not embedding or len(embedding) == 0:
                     raise EmbeddingError(f"Generated embedding is empty for text at index {idx}")
                 result[idx] = embedding
 
-            # Raise for any skipped empty-text positions
             for idx, emb in enumerate(result):
                 if emb is None:
                     raise EmbeddingError(f"Text at index {idx} was empty or whitespace-only")
 
             return result
 
-        except KeyError as e:
-            logger.error(f"Model or tokenizer not found: {e}")
-            raise EmbeddingError(f"Model configuration error: {e}", original_error=e)
+        try:
+            return await asyncio.to_thread(_infer_batch)
+        except EmbeddingError:
+            raise
         except Exception as e:
             logger.error(f"Batch embedding generation failed for {len(texts)} texts: {e}")
             raise EmbeddingError(f"Failed to generate batch embeddings: {str(e)}", original_error=e)
 
-    @retry_with_backoff(max_retries=2, initial_delay=0.5, exceptions=(Exception,), retryable=is_transient_error)
-    def _search_qdrant(self, collection_name: str, query_vector: List[float], limit: int) -> List[PointStruct]:
+    @async_retry_with_backoff(max_retries=2, initial_delay=0.5, exceptions=(Exception,), retryable=is_transient_error)
+    async def _search_qdrant(self, collection_name: str, query_vector: List[float], limit: int) -> List[PointStruct]:
         """
         Raw Qdrant query with retry logic for transient failures.
 
@@ -151,14 +155,14 @@ class RetrievalService:
         Returns:
             List of matching points
         """
-        results = self.qdrant.query_points(
+        results = await self.qdrant.query_points(
             collection_name=collection_name,
             query=query_vector,
             limit=limit,
         )
         return results.points
 
-    def search(self, collection_name: str, query_vector: List[float], limit: int) -> List[PointStruct]:
+    async def search(self, collection_name: str, query_vector: List[float], limit: int) -> List[PointStruct]:
         """
         Search collection with retry logic and structured error handling.
 
@@ -174,7 +178,7 @@ class RetrievalService:
             VectorDBError: If search operation fails after retries
         """
         try:
-            return self._search_qdrant(collection_name, query_vector, limit)
+            return await self._search_qdrant(collection_name, query_vector, limit)
         except Exception as e:
             logger.error(f"Qdrant search failed for collection '{collection_name}': {e}")
             raise VectorDBError(
@@ -182,7 +186,7 @@ class RetrievalService:
                 original_error=e
             )
 
-    def rerank(self, question: str, candidates: List[Dict[str, Any]], top_k: int) -> List[schema.SearchResult]:
+    async def rerank(self, question: str, candidates: List[Dict[str, Any]], top_k: int) -> List[schema.SearchResult]:
         """
         Sorts candidates by relevance using the Cross-Encoder.
 
@@ -214,10 +218,14 @@ class RetrievalService:
         try:
             tokenizer = self.models["cross_tokenizer"]
             model = self.models["cross_encoder"]
+        except KeyError as e:
+            logger.error(f"Model or tokenizer not found in config: {e}")
+            raise RerankingError(f"Model configuration error: {e}", original_error=e)
 
-            candidate_texts = [c.get("text", "") for c in candidates]
-            pairs = [[question, text] for text in candidate_texts]
+        candidate_texts = [c.get("text", "") for c in candidates]
+        pairs = [[question, text] for text in candidate_texts]
 
+        def _infer_rerank():
             inputs = tokenizer(
                 pairs, padding=True, truncation=True, return_tensors="np", max_length=512
             )
@@ -226,8 +234,6 @@ class RetrievalService:
             if not hasattr(outputs, "logits"):
                 raise RerankingError("Model output missing 'logits'")
 
-            # Apply sigmoid to logits so scores are in (0, 1) and
-            # comparable with bi-encoder cosine similarity scores
             raw_logits = outputs.logits.reshape(-1).tolist()
             scores = [1.0 / (1.0 + math.exp(-x)) for x in raw_logits]
 
@@ -236,29 +242,31 @@ class RetrievalService:
                     f"Score count mismatch: got {len(scores)} scores for {len(candidates)} candidates"
                 )
 
-            ranked_results = []
-            for score, content in zip(scores, candidates):
-                ranked_results.append(
-                    schema.SearchResult(
-                        text=content.get("text", ""),
-                        score=score,
-                        metadata={k: v for k, v in content.items() if k != "text"}
-                    )
-                )
+            return scores
 
-            # Sort descending (Highest score first)
-            ranked_results.sort(key=lambda x: x.score, reverse=True)
-
-            return ranked_results[:top_k]
-
-        except KeyError as e:
-            logger.error(f"Model or tokenizer not found in config: {e}")
-            raise RerankingError(f"Model configuration error: {e}", original_error=e)
+        try:
+            scores = await asyncio.to_thread(_infer_rerank)
+        except RerankingError:
+            raise
         except Exception as e:
             logger.error(f"Reranking failed for {len(candidates)} candidates: {e}")
             raise RerankingError(f"Failed to rerank results: {str(e)}", original_error=e)
 
-    def retrieve_context(self, question: str, collection_name: Optional[str] = None, n_retrieval: Optional[int] = None, n_ranking: Optional[int] = None) -> List[schema.SearchResult]:
+        ranked_results = []
+        for score, content in zip(scores, candidates):
+            ranked_results.append(
+                schema.SearchResult(
+                    text=content.get("text", ""),
+                    score=score,
+                    metadata={k: v for k, v in content.items() if k != "text"}
+                )
+            )
+
+        ranked_results.sort(key=lambda x: x.score, reverse=True)
+
+        return ranked_results[:top_k]
+
+    async def retrieve_context(self, question: str, collection_name: Optional[str] = None, n_retrieval: Optional[int] = None, n_ranking: Optional[int] = None) -> List[schema.SearchResult]:
         """
         Orchestrates the full retrieval pipeline: Embed -> Search -> Rerank.
 
@@ -280,7 +288,7 @@ class RetrievalService:
         collection = collection_name or self.config.kb_name
 
         try:
-            if not self.qdrant.collection_exists(collection):
+            if not await self.qdrant.collection_exists(collection):
                 raise HTTPException(status_code=404, detail=f"Collection '{collection}' not found")
         except HTTPException:
             raise
@@ -298,10 +306,10 @@ class RetrievalService:
         top_k = min(requested_top_k, limit)
 
         # 1. Embed (will raise EmbeddingError on failure)
-        query_vector = self._embed_text(question)
+        query_vector = await self._embed_text(question)
 
         # 2. Search (will raise VectorDBError on failure, with retry)
-        points = self.search(collection, query_vector, limit)
+        points = await self.search(collection, query_vector, limit)
 
         if not points:
             logger.info(f"No results found for query in collection '{collection}'")
@@ -310,6 +318,6 @@ class RetrievalService:
         candidates_list = [point.payload or {} for point in points]
 
         # 3. Rerank (will raise RerankingError on failure)
-        final_results = self.rerank(question, candidates_list, top_k)
+        final_results = await self.rerank(question, candidates_list, top_k)
 
         return final_results

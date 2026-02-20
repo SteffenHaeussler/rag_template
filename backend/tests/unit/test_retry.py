@@ -1,9 +1,9 @@
 """Tests for retry logic and utilities."""
 
 import pytest
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 import time
-from src.app.retry import retry_with_backoff, is_transient_error
+from src.app.retry import retry_with_backoff, async_retry_with_backoff, is_transient_error
 
 
 class TestRetryWithBackoff:
@@ -215,3 +215,114 @@ class TestIsTransientError:
 
         assert is_transient_error(error1) is True
         assert is_transient_error(error2) is True
+
+
+class TestAsyncRetryWithBackoff:
+    """Test async_retry_with_backoff decorator."""
+
+    async def test_successful_call_no_retry(self):
+        """Test that successful calls don't retry."""
+        mock_func = AsyncMock(return_value="success")
+        decorated = async_retry_with_backoff(max_retries=3)(mock_func)
+
+        result = await decorated()
+
+        assert result == "success"
+        assert mock_func.call_count == 1
+
+    async def test_retry_on_transient_failure(self):
+        """Test that function retries on transient failure."""
+        mock_func = AsyncMock(side_effect=[
+            Exception("Connection timeout"),
+            Exception("Connection timeout"),
+            "success"
+        ])
+        mock_func.__name__ = "mock_func"
+        decorated = async_retry_with_backoff(
+            max_retries=3, initial_delay=0.01, retryable=is_transient_error
+        )(mock_func)
+
+        with patch('src.app.retry.asyncio.sleep', new_callable=AsyncMock):
+            result = await decorated()
+
+        assert result == "success"
+        assert mock_func.call_count == 3
+
+    async def test_max_retries_exceeded(self):
+        """Test that function raises after max retries."""
+        mock_func = AsyncMock(side_effect=Exception("Always fails"))
+        mock_func.__name__ = "mock_func"
+        decorated = async_retry_with_backoff(max_retries=2, initial_delay=0.01)(mock_func)
+
+        with patch('src.app.retry.asyncio.sleep', new_callable=AsyncMock):
+            with pytest.raises(Exception):
+                await decorated()
+
+        assert mock_func.call_count == 3  # 1 initial + 2 retries
+
+    async def test_non_transient_not_retried(self):
+        """Test that non-transient errors are not retried."""
+        mock_func = AsyncMock(side_effect=Exception("Invalid API key"))
+        mock_func.__name__ = "mock_func"
+        decorated = async_retry_with_backoff(
+            max_retries=3, initial_delay=0.01, retryable=is_transient_error
+        )(mock_func)
+
+        with pytest.raises(Exception, match="Invalid API key"):
+            await decorated()
+
+        assert mock_func.call_count == 1  # No retries
+
+    async def test_uses_asyncio_sleep(self):
+        """Test that asyncio.sleep is used (not time.sleep)."""
+        mock_func = AsyncMock(side_effect=[
+            Exception("Connection timeout"),
+            "success"
+        ])
+        mock_func.__name__ = "mock_func"
+        decorated = async_retry_with_backoff(
+            max_retries=2, initial_delay=0.1, retryable=is_transient_error
+        )(mock_func)
+
+        with patch('src.app.retry.asyncio.sleep', new_callable=AsyncMock) as mock_sleep:
+            result = await decorated()
+
+        assert result == "success"
+        mock_sleep.assert_awaited()
+        mock_sleep.assert_awaited_once_with(0.1)
+
+    @patch('src.app.retry.logger')
+    async def test_logging_on_retry(self, mock_logger):
+        """Test that retries are logged."""
+        mock_func = AsyncMock(side_effect=[
+            Exception("Connection timeout"),
+            "success"
+        ])
+        mock_func.__name__ = "test_async_function"
+        decorated = async_retry_with_backoff(
+            max_retries=2, initial_delay=0.01, retryable=is_transient_error
+        )(mock_func)
+
+        with patch('src.app.retry.asyncio.sleep', new_callable=AsyncMock):
+            await decorated()
+
+        assert mock_logger.warning.called
+        warning_call = mock_logger.warning.call_args[0][0]
+        assert "test_async_function" in warning_call
+        assert "Retrying" in warning_call
+
+    @patch('src.app.retry.logger')
+    async def test_logging_on_final_failure(self, mock_logger):
+        """Test that final failure is logged as error."""
+        mock_func = AsyncMock(side_effect=Exception("Always fails"))
+        mock_func.__name__ = "test_async_function"
+        decorated = async_retry_with_backoff(max_retries=1, initial_delay=0.01)(mock_func)
+
+        with patch('src.app.retry.asyncio.sleep', new_callable=AsyncMock):
+            with pytest.raises(Exception):
+                await decorated()
+
+        assert mock_logger.error.called
+        error_call = mock_logger.error.call_args[0][0]
+        assert "test_async_function" in error_call
+        assert "attempts failed" in error_call

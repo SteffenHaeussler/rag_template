@@ -3,7 +3,7 @@ from time import time
 from typing import List, Union
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from qdrant_client import QdrantClient
+from qdrant_client import AsyncQdrantClient
 from loguru import logger
 
 from qdrant_client.models import Distance, PointStruct, VectorParams
@@ -35,9 +35,9 @@ DISTANCE_MAP = {
 # ==========================================
 
 
-def verify_collection(collection_name: str, qdrant: QdrantClient = Depends(get_qdrant)) -> str:
+async def verify_collection(collection_name: str, qdrant: AsyncQdrantClient = Depends(get_qdrant)) -> str:
     """Verify that collection exists, raise 404 if not."""
-    if not qdrant.collection_exists(collection_name):
+    if not await qdrant.collection_exists(collection_name):
         raise HTTPException(status_code=404, detail="Collection not found")
     return collection_name
 
@@ -47,7 +47,7 @@ def verify_collection(collection_name: str, qdrant: QdrantClient = Depends(get_q
 # ==========================================
 
 
-def validate_embedding_dimension(embedding: List[float], collection_name: str, qdrant: QdrantClient) -> None:
+async def validate_embedding_dimension(embedding: List[float], collection_name: str, qdrant: AsyncQdrantClient) -> None:
     """
     Validate that embedding dimension matches collection configuration.
 
@@ -59,7 +59,7 @@ def validate_embedding_dimension(embedding: List[float], collection_name: str, q
     Raises:
         HTTPException: If dimension doesn't match or collection uses named vectors
     """
-    collection_info = qdrant.get_collection(collection_name)
+    collection_info = await qdrant.get_collection(collection_name)
     vectors_config = collection_info.config.params.vectors
 
     if not hasattr(vectors_config, 'size'):
@@ -129,23 +129,23 @@ def health(config: Config = Depends(get_config)) -> schema.HealthCheckResponse:
 
 
 @v1.get("/collections/", response_model=schema.CollectionListResponse)
-def list_collections(qdrant: QdrantClient = Depends(get_qdrant)):
-    collections = qdrant.get_collections()
+async def list_collections(qdrant: AsyncQdrantClient = Depends(get_qdrant)):
+    collections = await qdrant.get_collections()
     return schema.CollectionListResponse(
         collections=[c.name for c in collections.collections]
     )
 
 
 @v1.post("/collections/", status_code=status.HTTP_201_CREATED, response_model=schema.CollectionResponse)
-def create_collection(collection: schema.CollectionCreate, qdrant: QdrantClient = Depends(get_qdrant)):
-    if qdrant.collection_exists(collection.name):
+async def create_collection(collection: schema.CollectionCreate, qdrant: AsyncQdrantClient = Depends(get_qdrant)):
+    if await qdrant.collection_exists(collection.name):
         raise HTTPException(status_code=400, detail="Collection already exists")
 
     distance = DISTANCE_MAP.get(collection.distance_metric.lower())
     if not distance:
         raise HTTPException(status_code=400, detail=f"Unknown distance metric: {collection.distance_metric}")
 
-    qdrant.create_collection(
+    await qdrant.create_collection(
         collection_name=collection.name,
         vectors_config=VectorParams(size=collection.dimension, distance=distance),
     )
@@ -154,8 +154,8 @@ def create_collection(collection: schema.CollectionCreate, qdrant: QdrantClient 
 
 
 @v1.delete("/collections/{collection_name}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_collection(collection_name: str = Depends(verify_collection), qdrant: QdrantClient = Depends(get_qdrant)):
-    qdrant.delete_collection(collection_name)
+async def delete_collection(collection_name: str = Depends(verify_collection), qdrant: AsyncQdrantClient = Depends(get_qdrant)):
+    await qdrant.delete_collection(collection_name)
 
 
 # ==========================================
@@ -164,21 +164,21 @@ def delete_collection(collection_name: str = Depends(verify_collection), qdrant:
 
 
 @v1.post("/collections/{collection_name}/datapoints/", status_code=status.HTTP_201_CREATED, response_model=schema.StatusResponse)
-def insert_datapoint(
+async def insert_datapoint(
     datapoint: schema.DatapointCreate,
     collection_name: str = Depends(verify_collection),
-    qdrant: QdrantClient = Depends(get_qdrant),
+    qdrant: AsyncQdrantClient = Depends(get_qdrant),
     retrieval_service: RetrievalService = Depends(get_retrieval_service),
 ):
     """Insert a single datapoint into collection."""
     point_id = datapoint.id or str(uuid.uuid4())
 
-    embedding = datapoint.embedding or retrieval_service._embed_text(datapoint.text)
+    embedding = datapoint.embedding or await retrieval_service._embed_text(datapoint.text)
 
     # Validate embedding dimension
-    validate_embedding_dimension(embedding, collection_name, qdrant)
+    await validate_embedding_dimension(embedding, collection_name, qdrant)
 
-    qdrant.upsert(
+    await qdrant.upsert(
         collection_name=collection_name,
         points=[
             PointStruct(
@@ -193,16 +193,16 @@ def insert_datapoint(
 
 
 @v1.post("/collections/{collection_name}/datapoints/bulk", status_code=status.HTTP_201_CREATED, response_model=schema.BulkInsertResponse)
-def insert_bulk_datapoints(
+async def insert_bulk_datapoints(
     datapoints: List[schema.DatapointCreate],
     collection_name: str = Depends(verify_collection),
-    qdrant: QdrantClient = Depends(get_qdrant),
+    qdrant: AsyncQdrantClient = Depends(get_qdrant),
     config: Config = Depends(get_config),
     retrieval_service: RetrievalService = Depends(get_retrieval_service),
 ):
     """Insert multiple datapoints in bulk with batch embedding for 10-50x speedup."""
     # Fetch collection dimension once (avoids N get_collection calls)
-    collection_info = qdrant.get_collection(collection_name)
+    collection_info = await qdrant.get_collection(collection_name)
     vectors_config = collection_info.config.params.vectors
     if not hasattr(vectors_config, 'size'):
         raise HTTPException(
@@ -232,7 +232,7 @@ def insert_bulk_datapoints(
 
     # Batch embed all texts that need embedding (10-50x faster!)
     if texts_to_embed:
-        batch_embeddings = retrieval_service._embed_texts_batch(texts_to_embed)
+        batch_embeddings = await retrieval_service._embed_texts_batch(texts_to_embed)
 
         # Validate dimensions and assign embeddings
         for batch_idx, dp_idx in enumerate(indices_to_embed):
@@ -259,7 +259,7 @@ def insert_bulk_datapoints(
     # Batch upsert to Qdrant
     batch_size = config.kb_batch_size
     for i in range(0, len(points), batch_size):
-        qdrant.upsert(
+        await qdrant.upsert(
             collection_name=collection_name,
             points=points[i : i + batch_size],
         )
@@ -274,9 +274,9 @@ def insert_bulk_datapoints(
 
 
 @v1.get("/collections/{collection_name}/datapoints/{datapoint_id}", response_model=schema.DatapointResponse)
-def get_datapoint(datapoint_id: Union[str, int], collection_name: str = Depends(verify_collection), qdrant: QdrantClient = Depends(get_qdrant)):
+async def get_datapoint(datapoint_id: Union[str, int], collection_name: str = Depends(verify_collection), qdrant: AsyncQdrantClient = Depends(get_qdrant)):
     datapoint_id = parse_datapoint_id(datapoint_id)
-    results = qdrant.retrieve(
+    results = await qdrant.retrieve(
         collection_name=collection_name,
         ids=[datapoint_id],
         with_payload=True,
@@ -294,10 +294,10 @@ def get_datapoint(datapoint_id: Union[str, int], collection_name: str = Depends(
 
 
 @v1.get("/collections/{collection_name}/datapoints/{datapoint_id}/embedding", response_model=schema.DatapointEmbeddingResponse)
-def get_datapoint_embedding(datapoint_id: str, collection_name: str = Depends(verify_collection), qdrant: QdrantClient = Depends(get_qdrant)):
+async def get_datapoint_embedding(datapoint_id: str, collection_name: str = Depends(verify_collection), qdrant: AsyncQdrantClient = Depends(get_qdrant)):
     datapoint_id = parse_datapoint_id(datapoint_id)
 
-    results = qdrant.retrieve(
+    results = await qdrant.retrieve(
         collection_name=collection_name,
         ids=[datapoint_id],
         with_payload=False,
@@ -316,18 +316,18 @@ def get_datapoint_embedding(datapoint_id: str, collection_name: str = Depends(ve
 
 
 @v1.put("/collections/{collection_name}/datapoints/{datapoint_id}", response_model=schema.StatusResponse)
-def update_datapoint(
+async def update_datapoint(
     datapoint_id: str,
     update_data: schema.DatapointUpdate,
     collection_name: str = Depends(verify_collection),
-    qdrant: QdrantClient = Depends(get_qdrant),
+    qdrant: AsyncQdrantClient = Depends(get_qdrant),
     retrieval_service: RetrievalService = Depends(get_retrieval_service),
 ):
     """Update an existing datapoint."""
     datapoint_id = parse_datapoint_id(datapoint_id)
 
     # Check point exists
-    results = qdrant.retrieve(
+    results = await qdrant.retrieve(
         collection_name=collection_name,
         ids=[datapoint_id],
         with_payload=True,
@@ -344,14 +344,14 @@ def update_datapoint(
     # Update text and re-embed if changed
     if update_data.text is not None:
         payload["text"] = update_data.text
-        vector = retrieval_service._embed_text(update_data.text)
-        validate_embedding_dimension(vector, collection_name, qdrant)
+        vector = await retrieval_service._embed_text(update_data.text)
+        await validate_embedding_dimension(vector, collection_name, qdrant)
 
     # Merge metadata
     if update_data.metadata is not None:
         payload.update(update_data.metadata)
 
-    qdrant.upsert(
+    await qdrant.upsert(
         collection_name=collection_name,
         points=[PointStruct(id=datapoint_id, vector=vector, payload=payload)],
     )
@@ -360,10 +360,10 @@ def update_datapoint(
 
 
 @v1.delete("/collections/{collection_name}/datapoints/{datapoint_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_datapoint(datapoint_id: str, collection_name: str = Depends(verify_collection), qdrant: QdrantClient = Depends(get_qdrant)):
+async def delete_datapoint(datapoint_id: str, collection_name: str = Depends(verify_collection), qdrant: AsyncQdrantClient = Depends(get_qdrant)):
     datapoint_id = parse_datapoint_id(datapoint_id)
 
-    qdrant.delete(
+    await qdrant.delete(
         collection_name=collection_name,
         points_selector=[datapoint_id],
     )
@@ -374,17 +374,17 @@ def delete_datapoint(datapoint_id: str, collection_name: str = Depends(verify_co
 
 
 @v1.post("/embedding/", response_model=schema.EmbeddingResponse)
-def embedding(body: schema.EmbeddingRequest, retrieval_service: RetrievalService = Depends(get_retrieval_service)) -> schema.EmbeddingResponse:
+async def embedding(body: schema.EmbeddingRequest, retrieval_service: RetrievalService = Depends(get_retrieval_service)) -> schema.EmbeddingResponse:
     """Generate embedding for text."""
-    mean_embedding = retrieval_service._embed_text(body.text)
+    mean_embedding = await retrieval_service._embed_text(body.text)
     return schema.EmbeddingResponse(text=body.text, embedding=mean_embedding)
 
 
 @v1.post("/ranking/")
-def ranking(body: schema.RankingRequest, retrieval_service: RetrievalService = Depends(get_retrieval_service)) -> schema.RankingResponse:
+async def ranking(body: schema.RankingRequest, retrieval_service: RetrievalService = Depends(get_retrieval_service)) -> schema.RankingResponse:
     """Rerank texts by relevance to question."""
     candidates = [{"text": text} for text in body.texts]
-    ranked_results = retrieval_service.rerank(
+    ranked_results = await retrieval_service.rerank(
         question=body.question,
         candidates=candidates,
         top_k=len(body.texts),
@@ -394,10 +394,10 @@ def ranking(body: schema.RankingRequest, retrieval_service: RetrievalService = D
 
 
 @v1.post("/collections/{collection_name}/search/", response_model=schema.SearchResponse)
-def search(
+async def search(
     collection_name: str,
     body: schema.SearchRequest,
-    qdrant: QdrantClient = Depends(get_qdrant),
+    qdrant: AsyncQdrantClient = Depends(get_qdrant),
     config: Config = Depends(get_config),
     retrieval_service: RetrievalService = Depends(get_retrieval_service),
 ) -> schema.SearchResponse:
@@ -405,9 +405,9 @@ def search(
     n_items = body.n_retrieval or config.kb_limit
 
     # Validate embedding dimension
-    validate_embedding_dimension(body.embedding, collection_name, qdrant)
+    await validate_embedding_dimension(body.embedding, collection_name, qdrant)
 
-    points = retrieval_service.search(
+    points = await retrieval_service.search(
             collection_name=collection_name,
             query_vector=body.embedding,
             limit=n_items
@@ -426,9 +426,9 @@ def search(
 
 
 @v1.post("/query/", response_model=schema.QueryResponse)
-def full_rag_pipeline(body: schema.QueryRequest, retrieval_service: RetrievalService = Depends(get_retrieval_service)) -> schema.QueryResponse:
+async def full_rag_pipeline(body: schema.QueryRequest, retrieval_service: RetrievalService = Depends(get_retrieval_service)) -> schema.QueryResponse:
     """Retrieve context: embed query, search, and rerank."""
-    final_results = retrieval_service.retrieve_context(
+    final_results = await retrieval_service.retrieve_context(
         question=body.question,
         collection_name=body.collection_name,
         n_retrieval=body.n_retrieval,
@@ -439,9 +439,9 @@ def full_rag_pipeline(body: schema.QueryRequest, retrieval_service: RetrievalSer
 
 
 @v1.post("/chat/", response_model=schema.ChatResponse)
-def chat(body: schema.ChatRequest, generation_service: GenerationService = Depends(get_generation_service)) -> schema.ChatResponse:
+async def chat(body: schema.ChatRequest, generation_service: GenerationService = Depends(get_generation_service)) -> schema.ChatResponse:
     """Generate answer from provided context (no retrieval)."""
-    answer = generation_service.generate_answer(
+    answer = await generation_service.generate_answer(
         question=body.question,
         context=body.context,
         prompt_key=body.prompt_key,
@@ -453,14 +453,14 @@ def chat(body: schema.ChatRequest, generation_service: GenerationService = Depen
 
 
 @v1.post("/rag/", response_model=schema.ChatResponse)
-def rag(
+async def rag(
     body: schema.RagRequest,
     retrieval_service: RetrievalService = Depends(get_retrieval_service),
     generation_service: GenerationService = Depends(get_generation_service),
 ) -> schema.ChatResponse:
     """Full RAG pipeline: Retrieve context from collection + Generate answer."""
     # Retrieve context
-    final_results = retrieval_service.retrieve_context(
+    final_results = await retrieval_service.retrieve_context(
         question=body.question,
         collection_name=body.collection_name,
         n_retrieval=body.n_retrieval,
@@ -470,7 +470,7 @@ def rag(
     context_texts = [result.text for result in final_results]
 
     # Generate Answer
-    answer = generation_service.generate_answer(
+    answer = await generation_service.generate_answer(
         question=body.question,
         context=context_texts,
         prompt_key=body.prompt_key,

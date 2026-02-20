@@ -1,5 +1,5 @@
 import pytest
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 from fastapi.testclient import TestClient
 from src.app.main import app, get_application
 from src.app.config import Config
@@ -8,11 +8,21 @@ from src.app.config import Config
 @pytest.fixture
 def mock_qdrant():
     mock = MagicMock()
+    mock.collection_exists = AsyncMock(return_value=True)
+    mock.get_collection = AsyncMock()
+    mock.query_points = AsyncMock()
+    mock.upsert = AsyncMock()
+    mock.delete = AsyncMock()
+    mock.retrieve = AsyncMock()
+    mock.get_collections = AsyncMock()
+    mock.create_collection = AsyncMock()
+    mock.delete_collection = AsyncMock()
+    mock.close = AsyncMock()
 
-    # Mock get_collection for dimension validation
-    mock_collection_info = MagicMock()
-    mock_collection_info.config.params.vectors.size = 384  # Default dimension
-    mock.get_collection.return_value = mock_collection_info
+    # Default collection info (used by dimension validation)
+    mock_info = MagicMock()
+    mock_info.config.params.vectors.size = 384
+    mock.get_collection.return_value = mock_info
 
     return mock
 

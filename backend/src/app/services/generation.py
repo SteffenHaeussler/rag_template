@@ -1,9 +1,9 @@
 from typing import Any, Dict, List, Optional
-from litellm import completion
+from litellm import acompletion
 from loguru import logger
 from src.app.config import Config
 from src.app.exceptions import GenerationError, ConfigurationError
-from src.app.retry import retry_with_backoff, is_transient_error
+from src.app.retry import async_retry_with_backoff, is_transient_error
 
 from jinja2.sandbox import SandboxedEnvironment
 
@@ -13,8 +13,8 @@ class GenerationService:
         self.model = config.generation_model
         self.prompts = prompts
 
-    @retry_with_backoff(max_retries=2, initial_delay=1.0, exceptions=(Exception,), retryable=is_transient_error)
-    def _call_llm(self, prompt: str, temperature: float) -> str:
+    @async_retry_with_backoff(max_retries=2, initial_delay=1.0, exceptions=(Exception,), retryable=is_transient_error)
+    async def _call_llm(self, prompt: str, temperature: float) -> str:
         """
         Call LLM API with retry logic for transient failures.
 
@@ -32,7 +32,7 @@ class GenerationService:
             GenerationError: If the API returns an empty response or content
             Exception: Raw API exceptions propagate for the retry decorator
         """
-        response = completion(
+        response = await acompletion(
             model=self.model,
             messages=[{"role": "user", "content": prompt}],
             temperature=temperature,
@@ -49,7 +49,7 @@ class GenerationService:
 
         return content
 
-    def generate_answer(self, question: str, context: List[str], prompt_key: Optional[str] = None, prompt_language: Optional[str] = None, temperature: Optional[float] = None) -> str:
+    async def generate_answer(self, question: str, context: List[str], prompt_key: Optional[str] = None, prompt_language: Optional[str] = None, temperature: Optional[float] = None) -> str:
         """
         Generates an answer using the configured LLM based on the provided context.
 
@@ -86,7 +86,7 @@ class GenerationService:
             raise GenerationError(f"Failed to render prompt template", original_error=e)
 
         try:
-            return self._call_llm(prompt, temp)
+            return await self._call_llm(prompt, temp)
         except GenerationError:
             raise
         except Exception as e:

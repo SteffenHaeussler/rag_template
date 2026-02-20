@@ -3,7 +3,7 @@
 from typing import Any, Dict
 
 from fastapi import Depends, Request
-from qdrant_client import QdrantClient
+from qdrant_client import AsyncQdrantClient
 
 from src.app.config import Config
 from src.app.services.generation import GenerationService
@@ -14,7 +14,7 @@ def get_config(request: Request) -> Config:
     return request.app.state.config
 
 
-def get_qdrant(request: Request) -> QdrantClient:
+def get_qdrant(request: Request) -> AsyncQdrantClient:
     return request.app.state.qdrant
 
 
@@ -27,7 +27,7 @@ def get_prompts(request: Request) -> Dict[str, Any]:
 
 
 def get_retrieval_service(
-    qdrant: QdrantClient = Depends(get_qdrant),
+    qdrant: AsyncQdrantClient = Depends(get_qdrant),
     config: Config = Depends(get_config),
     models: Dict[str, Any] = Depends(get_models),
 ) -> RetrievalService:

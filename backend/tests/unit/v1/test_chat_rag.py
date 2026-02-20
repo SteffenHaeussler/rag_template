@@ -1,5 +1,5 @@
 from fastapi import status
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from src.app.dependencies import get_generation_service, get_retrieval_service
@@ -18,7 +18,7 @@ def clear_overrides(test_app):
 def test_chat_success(client, test_app):
     """Test chat endpoint with valid question and context."""
     mock_service = MagicMock()
-    mock_service.generate_answer.return_value = "Python is the primary language for AI."
+    mock_service.generate_answer = AsyncMock(return_value="Python is the primary language for AI.")
     test_app.dependency_overrides[get_generation_service] = lambda: mock_service
 
     payload = {
@@ -44,7 +44,7 @@ def test_chat_success(client, test_app):
 def test_chat_with_optional_params(client, test_app):
     """Test chat endpoint with optional parameters."""
     mock_service = MagicMock()
-    mock_service.generate_answer.return_value = "Test answer"
+    mock_service.generate_answer = AsyncMock(return_value="Test answer")
     test_app.dependency_overrides[get_generation_service] = lambda: mock_service
 
     payload = {
@@ -104,11 +104,11 @@ def test_rag_success(client, test_app, mock_qdrant):
     mock_ret = MagicMock()
     mock_result = MagicMock()
     mock_result.text = "Python is the primary language for AI."
-    mock_ret.retrieve_context.return_value = [mock_result]
+    mock_ret.retrieve_context = AsyncMock(return_value=[mock_result])
     test_app.dependency_overrides[get_retrieval_service] = lambda: mock_ret
 
     mock_gen = MagicMock()
-    mock_gen.generate_answer.return_value = "Based on the context, Python is the primary language."
+    mock_gen.generate_answer = AsyncMock(return_value="Based on the context, Python is the primary language.")
     test_app.dependency_overrides[get_generation_service] = lambda: mock_gen
 
     mock_qdrant.collection_exists.return_value = True
@@ -136,11 +136,11 @@ def test_rag_success(client, test_app, mock_qdrant):
 def test_rag_with_optional_params(client, test_app, mock_qdrant):
     """Test RAG endpoint with optional retrieval parameters."""
     mock_ret = MagicMock()
-    mock_ret.retrieve_context.return_value = []
+    mock_ret.retrieve_context = AsyncMock(return_value=[])
     test_app.dependency_overrides[get_retrieval_service] = lambda: mock_ret
 
     mock_gen = MagicMock()
-    mock_gen.generate_answer.return_value = "Answer"
+    mock_gen.generate_answer = AsyncMock(return_value="Answer")
     test_app.dependency_overrides[get_generation_service] = lambda: mock_gen
 
     mock_qdrant.collection_exists.return_value = True
@@ -189,10 +189,10 @@ def test_rag_collection_not_found(client, test_app, mock_qdrant):
     from fastapi import HTTPException
 
     mock_ret = MagicMock()
-    mock_ret.retrieve_context.side_effect = HTTPException(
+    mock_ret.retrieve_context = AsyncMock(side_effect=HTTPException(
         status_code=404,
         detail="Collection 'nonexistent' not found"
-    )
+    ))
     test_app.dependency_overrides[get_retrieval_service] = lambda: mock_ret
 
     payload = {

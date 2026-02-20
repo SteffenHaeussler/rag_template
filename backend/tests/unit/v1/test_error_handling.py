@@ -2,7 +2,7 @@
 
 import pytest
 from fastapi import status
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 from src.app.dependencies import get_retrieval_service, get_generation_service
 from src.app.exceptions import (
@@ -26,7 +26,7 @@ class TestEmbeddingEndpointErrors:
     def test_embedding_service_error(self, client, test_app, mock_qdrant):
         """Test that embedding errors return 500."""
         mock_service = MagicMock()
-        mock_service._embed_text.side_effect = EmbeddingError("Model inference failed")
+        mock_service._embed_text = AsyncMock(side_effect=EmbeddingError("Model inference failed"))
         test_app.dependency_overrides[get_retrieval_service] = lambda: mock_service
 
         response = client.post("/v1/embedding/", json={"text": "test text"})
@@ -41,7 +41,7 @@ class TestRankingEndpointErrors:
     def test_ranking_service_error(self, client, test_app, mock_qdrant):
         """Test that reranking errors return 500."""
         mock_service = MagicMock()
-        mock_service.rerank.side_effect = RerankingError("Reranking model failed")
+        mock_service.rerank = AsyncMock(side_effect=RerankingError("Reranking model failed"))
         test_app.dependency_overrides[get_retrieval_service] = lambda: mock_service
 
         response = client.post("/v1/ranking/", json={
@@ -64,7 +64,7 @@ class TestSearchEndpointErrors:
         )
 
         mock_service = MagicMock()
-        mock_service.search.side_effect = VectorDBError("Qdrant connection failed")
+        mock_service.search = AsyncMock(side_effect=VectorDBError("Qdrant connection failed"))
         test_app.dependency_overrides[get_retrieval_service] = lambda: mock_service
 
         response = client.post("/v1/collections/test/search/", json={
@@ -81,7 +81,7 @@ class TestQueryEndpointErrors:
     def test_query_embedding_error(self, client, test_app, mock_qdrant):
         """Test that embedding errors in query return 500."""
         mock_service = MagicMock()
-        mock_service.retrieve_context.side_effect = EmbeddingError("Embedding failed")
+        mock_service.retrieve_context = AsyncMock(side_effect=EmbeddingError("Embedding failed"))
         test_app.dependency_overrides[get_retrieval_service] = lambda: mock_service
 
         response = client.post("/v1/query/", json={
@@ -95,7 +95,7 @@ class TestQueryEndpointErrors:
     def test_query_vectordb_error(self, client, test_app, mock_qdrant):
         """Test that vector DB errors in query return 500."""
         mock_service = MagicMock()
-        mock_service.retrieve_context.side_effect = VectorDBError("Search failed")
+        mock_service.retrieve_context = AsyncMock(side_effect=VectorDBError("Search failed"))
         test_app.dependency_overrides[get_retrieval_service] = lambda: mock_service
 
         response = client.post("/v1/query/", json={
@@ -109,7 +109,7 @@ class TestQueryEndpointErrors:
     def test_query_reranking_error(self, client, test_app, mock_qdrant):
         """Test that reranking errors in query return 500."""
         mock_service = MagicMock()
-        mock_service.retrieve_context.side_effect = RerankingError("Rerank failed")
+        mock_service.retrieve_context = AsyncMock(side_effect=RerankingError("Rerank failed"))
         test_app.dependency_overrides[get_retrieval_service] = lambda: mock_service
 
         response = client.post("/v1/query/", json={
@@ -127,7 +127,7 @@ class TestChatEndpointErrors:
     def test_chat_configuration_error(self, client, test_app):
         """Test that configuration errors return 400 (client error — bad prompt key/language)."""
         mock_service = MagicMock()
-        mock_service.generate_answer.side_effect = ConfigurationError("Missing prompt")
+        mock_service.generate_answer = AsyncMock(side_effect=ConfigurationError("Missing prompt"))
         test_app.dependency_overrides[get_generation_service] = lambda: mock_service
 
         response = client.post("/v1/chat/", json={
@@ -141,7 +141,7 @@ class TestChatEndpointErrors:
     def test_chat_generation_error(self, client, test_app):
         """Test that generation errors return 500."""
         mock_service = MagicMock()
-        mock_service.generate_answer.side_effect = GenerationError("LLM API failed")
+        mock_service.generate_answer = AsyncMock(side_effect=GenerationError("LLM API failed"))
         test_app.dependency_overrides[get_generation_service] = lambda: mock_service
 
         response = client.post("/v1/chat/", json={
@@ -159,7 +159,7 @@ class TestRAGEndpointErrors:
     def test_rag_retrieval_error(self, client, test_app, mock_qdrant):
         """Test that retrieval errors in RAG return 500."""
         mock_ret = MagicMock()
-        mock_ret.retrieve_context.side_effect = EmbeddingError("Embedding failed")
+        mock_ret.retrieve_context = AsyncMock(side_effect=EmbeddingError("Embedding failed"))
         test_app.dependency_overrides[get_retrieval_service] = lambda: mock_ret
 
         response = client.post("/v1/rag/", json={
@@ -175,13 +175,13 @@ class TestRAGEndpointErrors:
         from src.app.v1.schema import SearchResult
 
         mock_ret = MagicMock()
-        mock_ret.retrieve_context.return_value = [
+        mock_ret.retrieve_context = AsyncMock(return_value=[
             SearchResult(text="context", score=0.9, metadata={})
-        ]
+        ])
         test_app.dependency_overrides[get_retrieval_service] = lambda: mock_ret
 
         mock_gen = MagicMock()
-        mock_gen.generate_answer.side_effect = GenerationError("LLM failed")
+        mock_gen.generate_answer = AsyncMock(side_effect=GenerationError("LLM failed"))
         test_app.dependency_overrides[get_generation_service] = lambda: mock_gen
 
         response = client.post("/v1/rag/", json={
@@ -197,13 +197,13 @@ class TestRAGEndpointErrors:
         from src.app.v1.schema import SearchResult
 
         mock_ret = MagicMock()
-        mock_ret.retrieve_context.return_value = [
+        mock_ret.retrieve_context = AsyncMock(return_value=[
             SearchResult(text="context", score=0.9, metadata={})
-        ]
+        ])
         test_app.dependency_overrides[get_retrieval_service] = lambda: mock_ret
 
         mock_gen = MagicMock()
-        mock_gen.generate_answer.side_effect = ConfigurationError("Missing config")
+        mock_gen.generate_answer = AsyncMock(side_effect=ConfigurationError("Missing config"))
         test_app.dependency_overrides[get_generation_service] = lambda: mock_gen
 
         response = client.post("/v1/rag/", json={
@@ -226,7 +226,7 @@ class TestDatapointInsertErrors:
         )
 
         mock_service = MagicMock()
-        mock_service._embed_text.side_effect = EmbeddingError("Model failed")
+        mock_service._embed_text = AsyncMock(side_effect=EmbeddingError("Model failed"))
         test_app.dependency_overrides[get_retrieval_service] = lambda: mock_service
 
         response = client.post("/v1/collections/test/datapoints/", json={
@@ -244,7 +244,7 @@ class TestDatapointInsertErrors:
         )
 
         mock_service = MagicMock()
-        mock_service._embed_texts_batch.side_effect = EmbeddingError("Batch embedding failed")
+        mock_service._embed_texts_batch = AsyncMock(side_effect=EmbeddingError("Batch embedding failed"))
         test_app.dependency_overrides[get_retrieval_service] = lambda: mock_service
 
         response = client.post("/v1/collections/test/datapoints/bulk", json=[
@@ -265,7 +265,7 @@ class TestDatapointInsertErrors:
         mock_qdrant.retrieve.return_value = [mock_point]
 
         mock_service = MagicMock()
-        mock_service._embed_text.side_effect = EmbeddingError("Model failed")
+        mock_service._embed_text = AsyncMock(side_effect=EmbeddingError("Model failed"))
         test_app.dependency_overrides[get_retrieval_service] = lambda: mock_service
 
         response = client.put("/v1/collections/test/datapoints/123", json={
@@ -282,7 +282,7 @@ class TestErrorMessageQuality:
     def test_error_preserves_original_message(self, client, test_app, mock_qdrant):
         """Test that original error messages are preserved in response."""
         mock_service = MagicMock()
-        mock_service._embed_text.side_effect = EmbeddingError("Specific model error: Out of memory")
+        mock_service._embed_text = AsyncMock(side_effect=EmbeddingError("Specific model error: Out of memory"))
         test_app.dependency_overrides[get_retrieval_service] = lambda: mock_service
 
         response = client.post("/v1/embedding/", json={"text": "test"})
@@ -294,7 +294,7 @@ class TestErrorMessageQuality:
     def test_error_message_is_user_friendly(self, client, test_app):
         """Test that error messages don't expose internal details unnecessarily."""
         mock_service = MagicMock()
-        mock_service.generate_answer.side_effect = GenerationError("API rate limit exceeded")
+        mock_service.generate_answer = AsyncMock(side_effect=GenerationError("API rate limit exceeded"))
         test_app.dependency_overrides[get_generation_service] = lambda: mock_service
 
         response = client.post("/v1/chat/", json={
